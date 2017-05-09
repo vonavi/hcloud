@@ -5,17 +5,18 @@ module Types
   , Parameters(..)
   ) where
 
-data Node = Node String Int
+import           Data.Char                    (isDigit)
+import           Text.ParserCombinators.ReadP
+
+type Host = String
+type Port = String
+data Node = Node Host Port
 
 instance Show Node where
-  show (Node host port) = host ++ ":" ++ show port
+  show (Node host port) = host ++ ":" ++ port
 
 instance Read Node where
-  readsPrec d s = [ (Node host port, v)
-                  | (":", u)  <- lex t
-                  , (port, v) <- readsPrec d u
-                  ]
-    where (host, t) = break (== ':') s
+  readsPrec _ = readP_to_S $ Node <$> munch1 (/= ':') <* get <*> munch1 isDigit
 
 data Config = Config { sendPeriod  :: Int
                      , gracePeriod :: Int
