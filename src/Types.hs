@@ -1,6 +1,6 @@
 module Types
   (
-    Node(..)
+    NodeEndPoint(..)
   , Config(..)
   , Parameters(..)
   ) where
@@ -8,15 +8,16 @@ module Types
 import           Data.Char                    (isDigit)
 import           Text.ParserCombinators.ReadP
 
-type Host = String
-type Port = String
-data Node = Node Host Port
+type Host         = String
+type Port         = String
+data NodeEndPoint = NodeEndPoint Host Port
 
-instance Show Node where
-  show (Node host port) = host ++ ":" ++ port
+instance Show NodeEndPoint where
+  show (NodeEndPoint host port) = host ++ ":" ++ port
 
-instance Read Node where
-  readsPrec _ = readP_to_S $ Node <$> munch1 (/= ':') <* get <*> munch1 isDigit
+instance Read NodeEndPoint where
+  readsPrec _ = readP_to_S
+                $ NodeEndPoint <$> munch1 (/= ':') <* get <*> munch1 isDigit
 
 data Config = Config { sendPeriod  :: Int
                      , gracePeriod :: Int
@@ -25,4 +26,4 @@ data Config = Config { sendPeriod  :: Int
                      }
 
 data Parameters = RunParams Config
-                | TestParams Config Node
+                | TestParams Config NodeEndPoint
