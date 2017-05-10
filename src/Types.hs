@@ -10,7 +10,9 @@ import           Text.ParserCombinators.ReadP
 
 type Host         = String
 type Port         = String
-data NodeEndPoint = NodeEndPoint Host Port
+data NodeEndPoint = NodeEndPoint { getHost :: Host
+                                 , getPort :: Port
+                                 }
 
 instance Show NodeEndPoint where
   show (NodeEndPoint host port) = host ++ ":" ++ port

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+OPTS=$@
+CONF=node.conf
+NAME=hcloud
+
+tmux new-session -s ${NAME} -d
+tmux select-window -t ${NAME}:0
+
+for node in $(cat ${CONF}); do
+    tmux split-window -t ${NAME} \
+         "stack exec -- hcloud test ${OPTS} --node ${node} --config ${CONF} \
+                2>${node}.log"
+done
+
+tmux select-layout -t ${NAME} tiled
+tmux attach-session -t ${NAME}
