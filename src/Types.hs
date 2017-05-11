@@ -3,6 +3,9 @@ module Types
     NodeEndPoint(..)
   , Config(..)
   , Parameters(..)
+  , StopMessage
+  , receiverName
+  , stopMessage
   ) where
 
 import           Data.Char                    (isDigit)
@@ -29,3 +32,11 @@ data Config = Config { sendPeriod  :: Int
 
 data Parameters = RunParams Config
                 | TestParams Config NodeEndPoint
+
+type StopMessage = ()
+
+receiverName :: String
+receiverName = "receiver"
+
+stopMessage :: StopMessage
+stopMessage = ()
