@@ -52,7 +52,7 @@ sendMessages ept peers period = do
     res <- expectTimeout (1000000 * period) :: Process (Maybe StopMessage)
     kill pid "Send period is over"
     when (isNothing res) . forM_ peers
-      $ \p -> nsendRemote p receiverName stopMessage
+      $ \p -> nsendRemote p receiverName StopMessage
 
 mkPeerList :: NodeEndPoint -> [NodeEndPoint] -> [NodeId]
 mkPeerList ept = delete (mkNodeId ept) . map mkNodeId

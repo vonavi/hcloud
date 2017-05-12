@@ -1,14 +1,18 @@
+{-# LANGUAGE DeriveGeneric #-}
+
 module Types
   (
     NodeEndPoint(..)
   , Config(..)
   , Parameters(..)
-  , StopMessage
+  , StopMessage(..)
   , receiverName
-  , stopMessage
   ) where
 
+import           Data.Binary                  (Binary)
 import           Data.Char                    (isDigit)
+import           Data.Typeable                (Typeable)
+import           GHC.Generics                 (Generic)
 import           Text.ParserCombinators.ReadP
 
 type Host         = String
@@ -33,10 +37,8 @@ data Config = Config { sendPeriod  :: Int
 data Parameters = RunParams Config
                 | TestParams Config NodeEndPoint
 
-type StopMessage = ()
+data StopMessage = StopMessage deriving (Typeable, Generic)
+instance Binary StopMessage
 
 receiverName :: String
 receiverName = "receiver"
-
-stopMessage :: StopMessage
-stopMessage = ()
