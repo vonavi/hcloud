@@ -47,7 +47,7 @@ sendMessages ept peers period = do
           <$> createTransport (getHost ept) (getPort ept) defaultTCPParameters
   node <- newLocalNode tr initRemoteTable
   runProcess node $ do
-    pid <- spawnLocal initRaft
+    pid <- spawnLocal $ initRaft peers
     getSelfPid >>= register receiverName
     res <- expectTimeout (1000000 * period) :: Process (Maybe StopMessage)
     kill pid "Send period is over"
