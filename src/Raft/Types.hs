@@ -8,7 +8,7 @@ module Raft.Types
   , Role(..)
   , ServerState(..)
   , RequestVote(..)
-  , GrantVote(..)
+  , ResponseVote(..)
   , ActionMessage(..)
   , RemindMessage(..)
   , raftServerName
@@ -43,11 +43,16 @@ data RequestVote = RequestVote
                  deriving (Typeable, Generic)
 instance Binary RequestVote
 
-data GrantVote = GrantVote LeaderId deriving (Typeable, Generic)
-instance Binary GrantVote
+data ResponseVote = ResponseVote
+                    { resTerm     :: Term
+                    , voteGranted :: Bool
+                    }
+                  deriving (Typeable, Generic)
+instance Binary ResponseVote
 
 data ActionMessage = VoteGranted LeaderId
                    | VotesReceived
+                   | LaterTerm Term
                    | TimeoutElapsed
 
 data RemindMessage = RemindTimeout deriving (Typeable, Generic)
