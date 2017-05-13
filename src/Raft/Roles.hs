@@ -45,7 +45,8 @@ follower = StateT $ \currState -> do
                     -- AppendEntries RPC form current leader or
                     -- granting vote to candidate: convert to
                     -- candidate.
-                    , match $ \RemindTimeout -> updateRole st Candidate
+                    , match $ \RemindTimeout
+                              -> return st { currRole = Candidate }
                     ]
 
       voteResponse :: ServerState -> RequestVote -> ResponseVote
@@ -72,13 +73,13 @@ candidate peers = StateT $ \currState -> do
                                              , reqCandidateId = node
                                              }
 
-  nextState <- collectVotes updState node $ (length peers + 1) `div` 2
+  nextState <- collectVotes updState $ (length peers + 1) `div` 2
   exit reminder ()
   return ((), nextState)
   where
-    collectVotes :: ServerState -> NodeId -> Int -> Process ServerState
-    collectVotes st _    0 = updateRole st Leader
-    collectVotes st node n =
+    collectVotes :: ServerState -> Int -> Process ServerState
+    collectVotes st 0 = return st { currRole = Leader }
+    collectVotes st n =
       receiveWait
       [ match $ \ResponseVote{ resTerm     = term
                              , voteGranted = granted
@@ -86,9 +87,9 @@ candidate peers = StateT $ \currState -> do
                 -> case () of
                      _ | term > currTerm st -> do
                            newSt <- updCurrentTerm st term
-                           updateRole newSt $ FollowerOf node
-                     _ | granted            -> collectVotes st node (pred n)
-                     _                      -> collectVotes st node n
+                           return newSt { currRole = Follower }
+                     _ | granted            -> collectVotes st (pred n)
+                     _                      -> collectVotes st n
 
       -- If election timeout elapses: start new election
       , match $ \RemindTimeout -> return st
@@ -98,18 +99,18 @@ leader :: [NodeId] -> StateT ServerState Process ()
 leader _ = lift $ do say "I'm the leader."
                      liftIO $ threadDelay 1000000
 
-updateRole :: ServerState -> Role -> Process ServerState
-updateRole st newRole = return st { votedFor = Nothing
-                                  , currRole = newRole
-                                  }
-
 incCurrentTerm :: ServerState -> Process (Term, ServerState)
-incCurrentTerm st = return (updTerm, st { currTerm = updTerm })
+incCurrentTerm st = return (updTerm, newSt)
   where updTerm = succ $ currTerm st
+        newSt   = st { currTerm = updTerm
+                     , votedFor = Nothing
+                     }
 
 updCurrentTerm :: ServerState -> Term -> Process ServerState
 updCurrentTerm st term
-  | term > currTerm st = return st { currTerm = term }
+  | term > currTerm st = return st { currTerm = term
+                                   , votedFor = Nothing
+                                   }
   | otherwise          = return st
 
 remindAfter :: Int -> Process ProcessId

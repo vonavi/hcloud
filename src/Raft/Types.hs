@@ -20,9 +20,7 @@ import           GHC.Generics                (Generic)
 
 type Term     = Int
 type LeaderId = NodeId
-data Role     = FollowerOf LeaderId
-              | Candidate
-              | Leader
+data Role     = Follower | Candidate | Leader
 
 data ServerState = ServerState { currTerm :: Term
                                , votedFor :: Maybe LeaderId
