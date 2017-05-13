@@ -2,8 +2,7 @@
 
 module Raft.Types
   (
-    RaftConfig(..)
-  , Term
+    Term
   , LeaderId
   , Role(..)
   , ServerState(..)
@@ -11,18 +10,13 @@ module Raft.Types
   , ResponseVote(..)
   , RemindMessage(..)
   , raftServerName
+  , electionTimeoutMs
   ) where
 
 import           Control.Distributed.Process (NodeId)
 import           Data.Binary                 (Binary)
 import           Data.Typeable               (Typeable)
 import           GHC.Generics                (Generic)
-
-data RaftConfig = RaftConfig { electionTimeoutMs :: Int
-                               -- ^ Election timeout in milliseconds
-                             , peerNodes         :: [NodeId]
-                               -- ^ Peer nodes
-                             }
 
 type Term     = Int
 type LeaderId = NodeId
@@ -54,3 +48,7 @@ instance Binary RemindMessage
 
 raftServerName :: String
 raftServerName = "raft"
+
+-- | Election timeout in milliseconds
+electionTimeoutMs :: Int
+electionTimeoutMs = 150

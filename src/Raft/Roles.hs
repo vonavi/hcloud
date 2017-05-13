@@ -17,9 +17,9 @@ import           Control.Monad.Trans.State   (StateT (..))
 import           Raft.Types
 import           Raft.Utils                  (randomElectionTimeout)
 
-follower :: RaftConfig -> StateT ServerState Process ()
-follower cfg = StateT $ \currState -> do
-  eTime    <- randomElectionTimeout $ electionTimeoutMs cfg * 1000
+follower :: StateT ServerState Process ()
+follower = StateT $ \currState -> do
+  eTime    <- randomElectionTimeout $ electionTimeoutMs * 1000
   reminder <- remindAfter eTime
 
   -- Communicate if the election timer is not elapsed
@@ -59,15 +59,14 @@ follower cfg = StateT $ \currState -> do
                       Nothing     -> True
                       Just candId -> candId == reqCandidateId req
 
-candidate :: RaftConfig -> StateT ServerState Process ()
-candidate cfg = StateT $ \currState -> do
+candidate :: [NodeId] -> StateT ServerState Process ()
+candidate peers = StateT $ \currState -> do
   (term, updState) <- incCurrentTerm currState
-  eTime            <- randomElectionTimeout $ electionTimeoutMs cfg * 1000
+  eTime            <- randomElectionTimeout $ electionTimeoutMs * 1000
   reminder         <- remindAfter eTime
 
   -- Send RequestVote RPCs to all other servers
   node <- getSelfNode
-  let peers = peerNodes cfg
   forM_ peers $ \p -> nsendRemote p raftServerName
                                  RequestVote { reqTerm        = term
                                              , reqCandidateId = node
@@ -95,7 +94,7 @@ candidate cfg = StateT $ \currState -> do
       , match $ \RemindTimeout -> return st
       ]
 
-leader :: RaftConfig -> StateT ServerState Process ()
+leader :: [NodeId] -> StateT ServerState Process ()
 leader _ = lift $ do say "I'm the leader."
                      liftIO $ threadDelay 1000000
 

@@ -21,11 +21,8 @@ initRaft peers = do
                               , votedFor = Nothing
                               , currRole = FollowerOf node
                               }
-      cfg       = RaftConfig { electionTimeoutMs = 150 -- ms
-                             , peerNodes         = peers
-                             }
   flip evalStateT initState $ do
     lift $ getSelfPid >>= register raftServerName
-    forever $ (currRole <$> get) >>= \case FollowerOf _ -> follower cfg
-                                           Candidate    -> candidate cfg
-                                           Leader       -> leader cfg
+    forever $ (currRole <$> get) >>= \case FollowerOf _ -> follower
+                                           Candidate    -> candidate peers
+                                           Leader       -> leader peers
