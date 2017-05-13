@@ -30,13 +30,12 @@ follower = StateT $ \currState -> do
       respondToServers :: ServerState -> Process ServerState
       respondToServers st =
         receiveWait [ match $ \req@RequestVote{} -> do
-                        let candId   = reqCandidateId req
-                            response = voteResponse st req
-                        nsendRemote candId raftServerName response
-
                         -- Update the current term
                         newSt <- updCurrentTerm st (reqTerm req)
 
+                        let candId   = reqCandidateId req
+                            response = voteResponse newSt req
+                        nsendRemote candId raftServerName response
                         if voteGranted response
                           then return newSt { votedFor = Just candId }
                           else respondToServers newSt
