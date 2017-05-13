@@ -12,38 +12,40 @@ import           Control.Distributed.Process (NodeId, Process, ProcessId, exit,
                                               say, send, spawnLocal)
 import           Control.Monad               (forM_)
 import           Control.Monad.Trans.Class   (lift)
-import           Control.Monad.Trans.State   (StateT, get, put)
+import           Control.Monad.Trans.State   (StateT (..))
 
 import           Raft.Types
 import           Raft.Utils                  (randomElectionTimeout)
 
 follower :: RaftConfig -> StateT ServerState Process ()
-follower cfg = do
-  currState <- get
-  res       <- lift $ do
-    -- Reset election timer
-    eTime    <- randomElectionTimeout $ electionTimeoutMs cfg * 1000
-    reminder <- remindAfter eTime
+follower cfg = StateT $ \currState -> do
+  eTime    <- randomElectionTimeout $ electionTimeoutMs cfg * 1000
+  reminder <- remindAfter eTime
 
-    -- Communicate if the election timer is not elapsed
-    msg <- respondToServers currState
-    exit reminder ()
-    return msg
-  case res of
-    VoteGranted candId -> put currState { votedFor = Just candId }
-    _                  -> updateRole Candidate
+  -- Communicate if the election timer is not elapsed
+  nextState <- respondToServers currState
+  exit reminder ()
+  return ((), nextState)
     where
-      respondToServers :: ServerState -> Process ActionMessage
+      respondToServers :: ServerState -> Process ServerState
       respondToServers st =
         receiveWait [ match $ \req@RequestVote{} -> do
                         let candId   = reqCandidateId req
                             response = voteResponse st req
                         nsendRemote candId raftServerName response
-                        if voteGranted response
-                          then return $ VoteGranted candId
-                          else respondToServers st
 
-                    , match $ \RemindTimeout -> return TimeoutElapsed
+                        -- Update the current term
+                        newSt <- updCurrentTerm st (reqTerm req)
+
+                        if voteGranted response
+                          then return newSt { votedFor = Just candId }
+                          else respondToServers newSt
+
+                    -- If election timeout elapses without receiving
+                    -- AppendEntries RPC form current leader or
+                    -- granting vote to candidate: convert to
+                    -- candidate.
+                    , match $ \RemindTimeout -> updateRole st Candidate
                     ]
 
       voteResponse :: ServerState -> RequestVote -> ResponseVote
@@ -58,63 +60,58 @@ follower cfg = do
                       Just candId -> candId == reqCandidateId req
 
 candidate :: RaftConfig -> StateT ServerState Process ()
-candidate cfg = do
-  term <- incCurrentTerm
-  res  <- lift $ do
-    -- Reset election timer
-    eTime    <- randomElectionTimeout $ electionTimeoutMs cfg * 1000
-    reminder <- remindAfter eTime
+candidate cfg = StateT $ \currState -> do
+  (term, updState) <- incCurrentTerm currState
+  eTime            <- randomElectionTimeout $ electionTimeoutMs cfg * 1000
+  reminder         <- remindAfter eTime
 
-    -- Send RequestVote RPCs to all other servers
-    node <- getSelfNode
-    let peers = peerNodes cfg
-    forM_ peers $ \p -> nsendRemote p raftServerName
-                        RequestVote { reqTerm        = term
-                                    , reqCandidateId = node
-                                    }
-    -- Collect votes from servers
-    msg <- collectVotes node term $ (length peers + 1) `div` 2
-    exit reminder ()
-    return msg
-  case res of
-    VotesReceived      -> updateRole Leader
-    LaterTerm recvTerm -> do updCurrentTerm recvTerm
-                             node <- lift getSelfNode
-                             updateRole $ FollowerOf node
-    _                  -> return ()
+  -- Send RequestVote RPCs to all other servers
+  node <- getSelfNode
+  let peers = peerNodes cfg
+  forM_ peers $ \p -> nsendRemote p raftServerName
+                                 RequestVote { reqTerm        = term
+                                             , reqCandidateId = node
+                                             }
+
+  nextState <- collectVotes updState node $ (length peers + 1) `div` 2
+  exit reminder ()
+  return ((), nextState)
   where
-    collectVotes :: NodeId -> Term -> Int -> Process ActionMessage
-    collectVotes _    _    0 = return VotesReceived
-    collectVotes node term n =
+    collectVotes :: ServerState -> NodeId -> Int -> Process ServerState
+    collectVotes st _    0 = updateRole st Leader
+    collectVotes st node n =
       receiveWait
-      [ match $ \ResponseVote{ resTerm     = recvTerm
+      [ match $ \ResponseVote{ resTerm     = term
                              , voteGranted = granted
                              }
                 -> case () of
-                     _ | granted         -> collectVotes node term (pred n)
-                     _ | recvTerm > term -> return $ LaterTerm recvTerm
-                     _                   -> collectVotes node term n
+                     _ | term > currTerm st -> do
+                           newSt <- updCurrentTerm st term
+                           updateRole newSt $ FollowerOf node
+                     _ | granted            -> collectVotes st node (pred n)
+                     _                      -> collectVotes st node n
 
-      , match $ \RemindTimeout -> return TimeoutElapsed
+      -- If election timeout elapses: start new election
+      , match $ \RemindTimeout -> return st
       ]
 
 leader :: RaftConfig -> StateT ServerState Process ()
 leader _ = lift $ do say "I'm the leader."
                      liftIO $ threadDelay 1000000
 
-updateRole :: Role -> StateT ServerState Process ()
-updateRole newRole = do st <- get
-                        put st { currRole = newRole }
+updateRole :: ServerState -> Role -> Process ServerState
+updateRole st newRole = return st { votedFor = Nothing
+                                  , currRole = newRole
+                                  }
 
-incCurrentTerm :: StateT ServerState Process Term
-incCurrentTerm = do st <- get
-                    let term = succ $ currTerm st
-                    put st { currTerm = term }
-                    return term
+incCurrentTerm :: ServerState -> Process (Term, ServerState)
+incCurrentTerm st = return (updTerm, st { currTerm = updTerm })
+  where updTerm = succ $ currTerm st
 
-updCurrentTerm :: Term -> StateT ServerState Process ()
-updCurrentTerm term = do st <- get
-                         put st { currTerm = term }
+updCurrentTerm :: ServerState -> Term -> Process ServerState
+updCurrentTerm st term
+  | term > currTerm st = return st { currTerm = term }
+  | otherwise          = return st
 
 remindAfter :: Int -> Process ProcessId
 remindAfter micros = do

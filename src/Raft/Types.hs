@@ -9,7 +9,6 @@ module Raft.Types
   , ServerState(..)
   , RequestVote(..)
   , ResponseVote(..)
-  , ActionMessage(..)
   , RemindMessage(..)
   , raftServerName
   ) where
@@ -49,11 +48,6 @@ data ResponseVote = ResponseVote
                     }
                   deriving (Typeable, Generic)
 instance Binary ResponseVote
-
-data ActionMessage = VoteGranted LeaderId
-                   | VotesReceived
-                   | LaterTerm Term
-                   | TimeoutElapsed
 
 data RemindMessage = RemindTimeout deriving (Typeable, Generic)
 instance Binary RemindMessage
