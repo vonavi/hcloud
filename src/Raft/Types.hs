@@ -8,11 +8,11 @@ module Raft.Types
   , Command
   , LogEntry(..)
   , ServerState(..)
-  , RequestVote(..)
-  , ResponseVote(..)
+  , RequestVoteReq(..)
+  , RequestVoteRes(..)
   , AppendEntriesReq(..)
   , AppendEntriesRes(..)
-  , RemindMessage(..)
+  , RemindTimeout(..)
   , raftServerName
   , electionTimeoutMs
   , sendIntervalMs
@@ -47,19 +47,19 @@ data ServerState = ServerState { currTerm    :: Term
                                , currStdGen  :: StdGen
                                }
 
-data RequestVote = RequestVote
-                   { reqTerm        :: Term
-                   , reqCandidateId :: LeaderId
-                   }
-                 deriving (Typeable, Generic)
-instance Binary RequestVote
+data RequestVoteReq = RequestVoteReq
+                      { vreqTerm        :: Term
+                      , vreqCandidateId :: LeaderId
+                      }
+                    deriving (Typeable, Generic)
+instance Binary RequestVoteReq
 
-data ResponseVote = ResponseVote
-                    { resTerm     :: Term
-                    , voteGranted :: Bool
-                    }
-                  deriving (Typeable, Generic)
-instance Binary ResponseVote
+data RequestVoteRes = RequestVoteRes
+                      { vresTerm    :: Term
+                      , voteGranted :: Bool
+                      }
+                    deriving (Typeable, Generic)
+instance Binary RequestVoteRes
 
 data AppendEntriesReq = AppendEntriesReq
                         { areqTerm     :: Term
@@ -79,8 +79,8 @@ data AppendEntriesRes = AppendEntriesRes
                       deriving (Typeable, Generic)
 instance Binary AppendEntriesRes
 
-data RemindMessage = RemindTimeout deriving (Typeable, Generic)
-instance Binary RemindMessage
+data RemindTimeout = RemindTimeout deriving (Typeable, Generic)
+instance Binary RemindTimeout
 
 raftServerName :: String
 raftServerName = "raft"

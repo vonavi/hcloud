@@ -19,6 +19,7 @@ executable hcloud
   other-modules:       Parameters
                        Raft
                        Raft.AppendEntries
+                       Raft.RequestVote
                        Raft.Roles
                        Raft.Types
                        Raft.Utils

@@ -15,7 +15,9 @@ import           Control.Distributed.Process (NodeId, Process, ProcessId, exit,
 import           Control.Monad               (forM_)
 import           Control.Monad.Trans.State   (StateT (..))
 
-import           Raft.AppendEntries
+import           Raft.AppendEntries          (appendEntries, collectCommits,
+                                              sendAppendEntries)
+import           Raft.RequestVote            (collectVotes, responseVote)
 import           Raft.Types
 import           Raft.Utils                  (getNextIndex, incCurrentTerm,
                                               randomElectionTimeout,
@@ -24,7 +26,7 @@ import           Raft.Utils                  (getNextIndex, incCurrentTerm,
 follower :: StateT ServerState Process ()
 follower = StateT $ \currState -> do
   eTime    <- randomElectionTimeout $ electionTimeoutMs * 1000
-  reminder <- remindAfter eTime
+  reminder <- remindTimeout eTime
 
   -- Communicate if the election timer is not elapsed
   nextState <- respondToServers currState
@@ -37,12 +39,12 @@ follower = StateT $ \currState -> do
                               -> appendEntries req
                                  . updCurrentTerm (areqTerm req) $ st
 
-                    , match $ \req@RequestVote{} -> do
+                    , match $ \(req :: RequestVoteReq) -> do
                         -- Update the current term
-                        let newSt = updCurrentTerm (reqTerm req) st
+                        let newSt = updCurrentTerm (vreqTerm req) st
 
-                        let candId   = reqCandidateId req
-                            response = voteResponse newSt req
+                        let candId   = vreqCandidateId req
+                            response = responseVote newSt req
                         nsendRemote candId raftServerName response
                         if voteGranted response
                           then return newSt { votedFor = Just candId }
@@ -52,55 +54,26 @@ follower = StateT $ \currState -> do
                     -- AppendEntries RPC form current leader or
                     -- granting vote to candidate: convert to
                     -- candidate.
-                    , match $ \RemindTimeout
+                    , match $ \(_ :: RemindTimeout)
                               -> return st { currRole = Candidate }
                     ]
-
-      voteResponse :: ServerState -> RequestVote -> ResponseVote
-      voteResponse st req = ResponseVote { resTerm     = currTerm st
-                                         , voteGranted = granted
-                                         }
-        where granted
-                | reqTerm req < currTerm st = False
-                | otherwise                 =
-                    case votedFor st of
-                      Nothing     -> True
-                      Just candId -> candId == reqCandidateId req
 
 candidate :: [NodeId] -> StateT ServerState Process ()
 candidate peers = StateT $ \currState -> do
   let (term, updState) = incCurrentTerm currState
   eTime    <- randomElectionTimeout $ electionTimeoutMs * 1000
-  reminder <- remindAfter eTime
+  reminder <- remindTimeout eTime
 
   -- Send RequestVote RPCs to all other servers
   node <- getSelfNode
   forM_ peers $ \p -> nsendRemote p raftServerName
-                                 RequestVote { reqTerm        = term
-                                             , reqCandidateId = node
-                                             }
+                                 RequestVoteReq { vreqTerm        = term
+                                                , vreqCandidateId = node
+                                                }
 
   nextState <- collectVotes updState $ (length peers + 1) `div` 2
   exit reminder ()
   return ((), nextState)
-  where
-    collectVotes :: ServerState -> Int -> Process ServerState
-    collectVotes st 0 = return st { currRole = Leader }
-    collectVotes st n =
-      receiveWait
-      [ match $ \ResponseVote{ resTerm     = term
-                             , voteGranted = granted
-                             }
-                -> case () of
-                     _ | term > currTerm st -> do
-                           let newSt = updCurrentTerm term st
-                           return newSt { currRole = Follower }
-                     _ | granted            -> collectVotes st (pred n)
-                     _                      -> collectVotes st n
-
-      -- If election timeout elapses: start new election
-      , match $ \RemindTimeout -> return st
-      ]
 
 leader :: [NodeId] -> StateT ServerState Process ()
 leader peers = StateT $ \currState -> do
@@ -111,8 +84,8 @@ leader peers = StateT $ \currState -> do
   exit sender ()
   return ((), nextState)
 
-remindAfter :: Int -> Process ProcessId
-remindAfter micros = do
+remindTimeout :: Int -> Process ProcessId
+remindTimeout micros = do
   pid <- getSelfPid
   spawnLocal $ do
     liftIO $ threadDelay micros
