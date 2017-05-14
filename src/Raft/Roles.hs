@@ -35,28 +35,24 @@ follower = StateT $ \currState -> do
     where
       respondToServers :: ServerState -> Process ServerState
       respondToServers st =
-        receiveWait [ match $ \(req :: AppendEntriesReq)
-                              -> appendEntries req
-                                 . updCurrentTerm (areqTerm req) $ st
+        receiveWait
+        [ -- If election timeout elapses without receiving
+          -- AppendEntries RPC form current leader or granting vote to
+          -- candidate: convert to candidate.
+          match $ \(_ :: RemindTimeout) -> return st { currRole = Candidate }
 
-                    , match $ \(req :: RequestVoteReq) -> do
-                        -- Update the current term
-                        let newSt = updCurrentTerm (vreqTerm req) st
+        , match $ \(req :: AppendEntriesReq)
+                  -> appendEntries req . updCurrentTerm (areqTerm req) $ st
 
-                        let candId   = vreqCandidateId req
-                            response = responseVote newSt req
-                        nsendRemote candId raftServerName response
-                        if voteGranted response
-                          then return newSt { votedFor = Just candId }
-                          else respondToServers newSt
-
-                    -- If election timeout elapses without receiving
-                    -- AppendEntries RPC form current leader or
-                    -- granting vote to candidate: convert to
-                    -- candidate.
-                    , match $ \(_ :: RemindTimeout)
-                              -> return st { currRole = Candidate }
-                    ]
+        , match $ \(req :: RequestVoteReq) -> do
+            let newSt    = updCurrentTerm (vreqTerm req) st
+                candId   = vreqCandidateId req
+                response = responseVote newSt req
+            nsendRemote candId raftServerName response
+            if voteGranted response
+              then return newSt { votedFor = Just candId }
+              else respondToServers newSt
+        ]
 
 candidate :: [NodeId] -> StateT ServerState Process ()
 candidate peers = StateT $ \currState -> do

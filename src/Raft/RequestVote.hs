@@ -26,7 +26,10 @@ collectVotes :: ServerState -> Int -> Process ServerState
 collectVotes st 0 = return st { currRole = Leader }
 collectVotes st n =
   receiveWait
-  [ match $ \(res :: RequestVoteRes) -> do
+  [ -- If election timeout elapses: start new election
+    match $ \(_ :: RemindTimeout) -> return st
+
+  , match $ \(res :: RequestVoteRes) -> do
       let term = vresTerm res
       case () of
         _ | term > currTerm st -> do
@@ -34,7 +37,4 @@ collectVotes st n =
               return newSt { currRole = Follower }
         _ | voteGranted res    -> collectVotes st (pred n)
         _                      -> collectVotes st n
-
-    -- If election timeout elapses: start new election
-  , match $ \(_ :: RemindTimeout) -> return st
   ]
