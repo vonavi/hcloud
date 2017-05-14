@@ -2,10 +2,10 @@
 
 module Raft.Types
   (
-    Term
+    Xorshift32(..)
+  , Term
   , LeaderId
   , Role(..)
-  , Command
   , LogEntry(..)
   , ServerState(..)
   , RequestVoteReq(..)
@@ -21,15 +21,18 @@ module Raft.Types
 import           Control.Distributed.Process (NodeId)
 import           Data.Binary                 (Binary)
 import           Data.Typeable               (Typeable)
+import           Data.Word                   (Word32)
 import           GHC.Generics                (Generic)
-import           System.Random               (StdGen)
+
+newtype Xorshift32 = Xorshift32 { getWord32 :: Word32 }
+                   deriving (Typeable, Generic)
+instance Binary Xorshift32
 
 type Term     = Int
 type LeaderId = NodeId
 data Role     = Follower | Candidate | Leader
-type Command  = Double
 
-data LogEntry = LogEntry { logCmd   :: Command
+data LogEntry = LogEntry { logSeed  :: Xorshift32
                          , logTerm  :: Term
                          , logIndex :: Int
                          }
@@ -44,7 +47,7 @@ data ServerState = ServerState { currTerm    :: Term
                                , lastApplied :: Int
                                , nextIndex   :: [(NodeId, Int)]
                                , matchIndex  :: [(NodeId, Int)]
-                               , currStdGen  :: StdGen
+                               , initSeed    :: Xorshift32
                                }
 
 data RequestVoteReq = RequestVoteReq

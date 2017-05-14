@@ -17,14 +17,15 @@ import           Raft.Utils                  (getNextIndex, nextRandomNum,
                                               updCurrentTerm)
 
 newClientEntry :: ServerState -> ServerState
-newClientEntry st = st { currLog    = entry : currLog st
-                       , currStdGen = gen
-                       }
-  where entry      = LogEntry { logCmd   = cmd
-                              , logTerm  = currTerm st
-                              , logIndex = getNextIndex $ currLog st
-                              }
-        (cmd, gen) = nextRandomNum $ currStdGen st
+newClientEntry st = st { currLog  = entry : oldLog }
+  where oldLog = currLog st
+        seed   = case oldLog of
+                   (e : _) -> nextRandomNum $ logSeed e
+                   []      -> initSeed st
+        entry  = LogEntry { logSeed  = seed
+                          , logTerm  = currTerm st
+                          , logIndex = getNextIndex oldLog
+                          }
 
 sendAppendEntries :: NodeId -> Int -> ServerState -> Process ()
 sendAppendEntries peer idx st = do

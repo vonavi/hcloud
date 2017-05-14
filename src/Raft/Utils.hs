@@ -8,7 +8,8 @@ module Raft.Utils
   ) where
 
 import           Control.Distributed.Process (Process, liftIO)
-import           System.Random               (RandomGen, randomR, randomRIO)
+import           Data.Bits                   (shiftL, shiftR, xor)
+import           System.Random               (randomRIO)
 
 import           Raft.Types
 
@@ -34,5 +35,9 @@ getNextIndex :: [LogEntry] -> Int
 getNextIndex (x : _) = succ $ logIndex x
 getNextIndex _       = 1
 
-nextRandomNum :: RandomGen g => g -> (Double, g)
-nextRandomNum = randomR (0.001, 1)
+-- Iterates the random generator for 32 bits
+nextRandomNum :: Xorshift32 -> Xorshift32
+nextRandomNum (Xorshift32 a) = Xorshift32 d
+  where b = a `xor` shiftL a 13
+        c = b `xor` shiftR b 17
+        d = c `xor` shiftL c 5

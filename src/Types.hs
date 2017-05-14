@@ -12,6 +12,7 @@ module Types
 import           Data.Binary                  (Binary)
 import           Data.Char                    (isDigit)
 import           Data.Typeable                (Typeable)
+import           Data.Word                    (Word32)
 import           GHC.Generics                 (Generic)
 import           Text.ParserCombinators.ReadP
 
@@ -30,7 +31,7 @@ instance Read NodeEndPoint where
 
 data Config = Config { sendPeriod  :: Int
                      , gracePeriod :: Int
-                     , msgSeed     :: Int
+                     , msgSeed     :: Word32
                      , nodeConf    :: FilePath
                      }
 

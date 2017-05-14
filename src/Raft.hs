@@ -10,12 +10,12 @@ import           Control.Distributed.Process (NodeId, Process, getSelfPid,
 import           Control.Monad               (forever)
 import           Control.Monad.Trans.Class   (lift)
 import           Control.Monad.Trans.State   (evalStateT, get)
-import           System.Random               (mkStdGen)
+import           Data.Word                   (Word32)
 
 import           Raft.Roles
 import           Raft.Types
 
-initRaft :: [NodeId] -> Int -> Process ()
+initRaft :: [NodeId] -> Word32 -> Process ()
 initRaft peers seed =
   flip evalStateT raftInitState $ do
     lift $ getSelfPid >>= register raftServerName
@@ -30,5 +30,5 @@ initRaft peers seed =
                                         , lastApplied = 0
                                         , nextIndex   = zip peers $ repeat 1
                                         , matchIndex  = zip peers $ repeat 0
-                                        , currStdGen  = mkStdGen seed
+                                        , initSeed    = Xorshift32 seed
                                         }
