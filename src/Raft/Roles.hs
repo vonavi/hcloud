@@ -1,3 +1,5 @@
+{-# LANGUAGE ScopedTypeVariables #-}
+
 module Raft.Roles
   (
     follower
@@ -9,13 +11,15 @@ import           Control.Concurrent          (threadDelay)
 import           Control.Distributed.Process (NodeId, Process, ProcessId, exit,
                                               getSelfNode, getSelfPid, liftIO,
                                               match, nsendRemote, receiveWait,
-                                              say, send, spawnLocal)
+                                              send, spawnLocal)
 import           Control.Monad               (forM_)
-import           Control.Monad.Trans.Class   (lift)
 import           Control.Monad.Trans.State   (StateT (..))
 
+import           Raft.AppendEntries
 import           Raft.Types
-import           Raft.Utils                  (randomElectionTimeout)
+import           Raft.Utils                  (getNextIndex, incCurrentTerm,
+                                              randomElectionTimeout,
+                                              updCurrentTerm)
 
 follower :: StateT ServerState Process ()
 follower = StateT $ \currState -> do
@@ -29,9 +33,13 @@ follower = StateT $ \currState -> do
     where
       respondToServers :: ServerState -> Process ServerState
       respondToServers st =
-        receiveWait [ match $ \req@RequestVote{} -> do
+        receiveWait [ match $ \(req :: AppendEntriesReq)
+                              -> appendEntries req
+                                 . updCurrentTerm (areqTerm req) $ st
+
+                    , match $ \req@RequestVote{} -> do
                         -- Update the current term
-                        newSt <- updCurrentTerm st (reqTerm req)
+                        let newSt = updCurrentTerm (reqTerm req) st
 
                         let candId   = reqCandidateId req
                             response = voteResponse newSt req
@@ -61,9 +69,9 @@ follower = StateT $ \currState -> do
 
 candidate :: [NodeId] -> StateT ServerState Process ()
 candidate peers = StateT $ \currState -> do
-  (term, updState) <- incCurrentTerm currState
-  eTime            <- randomElectionTimeout $ electionTimeoutMs * 1000
-  reminder         <- remindAfter eTime
+  let (term, updState) = incCurrentTerm currState
+  eTime    <- randomElectionTimeout $ electionTimeoutMs * 1000
+  reminder <- remindAfter eTime
 
   -- Send RequestVote RPCs to all other servers
   node <- getSelfNode
@@ -85,7 +93,7 @@ candidate peers = StateT $ \currState -> do
                              }
                 -> case () of
                      _ | term > currTerm st -> do
-                           newSt <- updCurrentTerm st term
+                           let newSt = updCurrentTerm term st
                            return newSt { currRole = Follower }
                      _ | granted            -> collectVotes st (pred n)
                      _                      -> collectVotes st n
@@ -95,22 +103,13 @@ candidate peers = StateT $ \currState -> do
       ]
 
 leader :: [NodeId] -> StateT ServerState Process ()
-leader _ = lift $ do say "I'm the leader."
-                     liftIO $ threadDelay 1000000
+leader peers = StateT $ \currState -> do
+  let idx = getNextIndex $ currLog currState
+  sender <- spawnLocal . forM_ peers $ \p -> sendAppendEntries p idx currState
 
-incCurrentTerm :: ServerState -> Process (Term, ServerState)
-incCurrentTerm st = return (updTerm, newSt)
-  where updTerm = succ $ currTerm st
-        newSt   = st { currTerm = updTerm
-                     , votedFor = Nothing
-                     }
-
-updCurrentTerm :: ServerState -> Term -> Process ServerState
-updCurrentTerm st term
-  | term > currTerm st = return st { currTerm = term
-                                   , votedFor = Nothing
-                                   }
-  | otherwise          = return st
+  nextState <- collectCommits currState $ (length peers + 1) `div` 2
+  exit sender ()
+  return ((), nextState)
 
 remindAfter :: Int -> Process ProcessId
 remindAfter micros = do

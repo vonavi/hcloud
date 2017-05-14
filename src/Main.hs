@@ -32,24 +32,24 @@ main = execParser getParameters >>= \case
     nodeEndPoints <- map read . lines <$> readFile (nodeConf cfg)
     forConcurrently_ nodeEndPoints
       $ \ept -> do let peers = mkPeerList ept nodeEndPoints
-                   sendMessages ept peers (sendPeriod cfg)
+                   sendMessages ept peers cfg
     liftIO . threadDelay . (1000000 *) $ sendPeriod cfg + gracePeriod cfg
 
   TestParams cfg ept -> do
     nodeEndPoints <- map read . lines <$> readFile (nodeConf cfg)
     let peers = mkPeerList ept nodeEndPoints
-    _ <- forkIO $ sendMessages ept peers (sendPeriod cfg)
+    _ <- forkIO $ sendMessages ept peers cfg
     liftIO . threadDelay . (1000000 *) $ sendPeriod cfg + gracePeriod cfg
 
-sendMessages :: NodeEndPoint -> [NodeId] -> Int -> IO ()
-sendMessages ept peers period = do
+sendMessages :: NodeEndPoint -> [NodeId] -> Config -> IO ()
+sendMessages ept peers cfg = do
   tr   <- either (error . show) id
           <$> createTransport (getHost ept) (getPort ept) defaultTCPParameters
   node <- newLocalNode tr initRemoteTable
   runProcess node $ do
-    pid <- spawnLocal $ initRaft peers
+    pid <- spawnLocal $ initRaft peers (msgSeed cfg)
     getSelfPid >>= register receiverName
-    res <- expectTimeout (1000000 * period) :: Process (Maybe StopMessage)
+    res <- expectTimeout (1000000 * sendPeriod cfg) :: Process (Maybe StopMessage)
     kill pid "Send period is over"
     when (isNothing res) . forM_ peers
       $ \p -> nsendRemote p receiverName StopMessage
