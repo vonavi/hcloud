@@ -6,13 +6,14 @@ module Raft.RequestVote
   , collectVotes
   ) where
 
-import           Control.Distributed.Process (Process, match, receiveWait)
+import           Control.Concurrent.MVar.Lifted (MVar, modifyMVar_, readMVar)
+import           Control.Distributed.Process    (Process, match, receiveWait)
 
 import           Raft.Types
-import           Raft.Utils                  (updCurrentTerm)
+import           Raft.Utils                     (updCurrentTerm)
 
-responseVote :: ServerState -> RequestVoteReq -> RequestVoteRes
-responseVote st req = RequestVoteRes { vresTerm    = currTerm st
+responseVote :: RequestVoteReq -> ServerState -> RequestVoteRes
+responseVote req st = RequestVoteRes { vresTerm    = currTerm st
                                      , voteGranted = granted
                                      }
   where granted
@@ -22,19 +23,19 @@ responseVote st req = RequestVoteRes { vresTerm    = currTerm st
                 Nothing     -> True
                 Just candId -> candId == vreqCandidateId req
 
-collectVotes :: ServerState -> Int -> Process ServerState
-collectVotes st 0 = return st { currRole = Leader }
-collectVotes st n =
+collectVotes :: MVar ServerState -> Int -> Process ()
+collectVotes mx 0 = modifyMVar_ mx $ \st -> return st { currRole = Leader }
+collectVotes mx n =
   receiveWait
   [ -- If election timeout elapses: start new election
-    match $ \(_ :: RemindTimeout) -> return st
+    match $ \(_ :: RemindTimeout) -> return ()
 
   , match $ \(res :: RequestVoteRes) -> do
-      let term = vresTerm res
+      term <- currTerm <$> readMVar mx
       case () of
-        _ | term > currTerm st -> do
-              let newSt = updCurrentTerm term st
-              return newSt { currRole = Follower }
-        _ | voteGranted res    -> collectVotes st (pred n)
-        _                      -> collectVotes st n
+        _ | vresTerm res > term -> do
+              updCurrentTerm mx (vresTerm res)
+              modifyMVar_ mx $ \st -> return st { currRole = Follower }
+        _ | voteGranted res    -> collectVotes mx (pred n)
+        _                      -> collectVotes mx n
   ]

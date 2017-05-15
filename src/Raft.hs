@@ -5,30 +5,29 @@ module Raft
     initRaft
   ) where
 
-import           Control.Distributed.Process (NodeId, Process, getSelfPid,
-                                              register)
-import           Control.Monad               (forever)
-import           Control.Monad.Trans.Class   (lift)
-import           Control.Monad.Trans.State   (evalStateT, get)
-import           Data.Word                   (Word32)
+import           Control.Concurrent.MVar.Lifted (newMVar, readMVar)
+import           Control.Distributed.Process    (NodeId, Process, getSelfPid,
+                                                 register)
+import           Control.Monad                  (forever)
+import           Data.Word                      (Word32)
 
 import           Raft.Roles
 import           Raft.Types
 
 initRaft :: [NodeId] -> Word32 -> Process ()
-initRaft peers seed =
-  flip evalStateT raftInitState $ do
-    lift $ getSelfPid >>= register raftServerName
-    forever $ (currRole <$> get) >>= \case Follower  -> follower
-                                           Candidate -> candidate peers
-                                           Leader    -> leader peers
-      where raftInitState = ServerState { currTerm    = 0
-                                        , votedFor    = Nothing
-                                        , currRole    = Follower
-                                        , currLog     = []
-                                        , commitIndex = 0
-                                        , lastApplied = 0
-                                        , nextIndex   = zip peers $ repeat 1
-                                        , matchIndex  = zip peers $ repeat 0
-                                        , initSeed    = Xorshift32 seed
-                                        }
+initRaft peers seed = do
+  mx <- newMVar ServerState { currTerm    = 0
+                            , votedFor    = Nothing
+                            , currRole    = Follower
+                            , currLog     = []
+                            , commitIndex = 0
+                            , lastApplied = 0
+                            , nextIndex   = zip peers $ repeat 1
+                            , matchIndex  = zip peers $ repeat 0
+                            , initSeed    = Xorshift32 seed
+                            }
+  getSelfPid >>= register raftServerName
+  forever $ (currRole <$> readMVar mx) >>= \case
+    Follower  -> follower mx
+    Candidate -> candidate mx peers
+    Leader    -> leader mx peers

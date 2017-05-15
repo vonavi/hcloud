@@ -7,25 +7,31 @@ module Raft.Utils
   , nextRandomNum
   ) where
 
-import           Control.Distributed.Process (Process, liftIO)
-import           Data.Bits                   (shiftL, shiftR, xor)
-import           System.Random               (randomRIO)
+import           Control.Concurrent.MVar.Lifted               (MVar, modifyMVar,
+                                                               modifyMVar_)
+import           Control.Distributed.Process                  (Process, liftIO)
+import           Control.Distributed.Process.MonadBaseControl ()
+import           Data.Bits                                    (shiftL, shiftR,
+                                                               xor)
+import           System.Random                                (randomRIO)
 
 import           Raft.Types
 
-updCurrentTerm :: Term -> ServerState -> ServerState
-updCurrentTerm term st
-  | term > currTerm st = st { currTerm = term
-                            , votedFor = Nothing
-                            }
-  | otherwise          = st
+updCurrentTerm :: MVar ServerState -> Term -> Process ()
+updCurrentTerm mx term = modifyMVar_ mx $ return . updater
+  where updater st = if term > currTerm st
+                     then st { currTerm = term
+                             , votedFor = Nothing
+                             }
+                     else st
 
-incCurrentTerm :: ServerState -> (Term, ServerState)
-incCurrentTerm st = (updTerm, newSt)
-  where updTerm = succ $ currTerm st
-        newSt   = st { currTerm = updTerm
-                     , votedFor = Nothing
-                     }
+incCurrentTerm :: MVar ServerState -> Process Term
+incCurrentTerm mx = modifyMVar mx $ return . updater
+  where updater st = (updSt, updTerm)
+          where updTerm = succ $ currTerm st
+                updSt   = st { currTerm = updTerm
+                             , votedFor = Nothing
+                             }
 
 randomElectionTimeout :: Int -> Process Int
 randomElectionTimeout base =

@@ -8,13 +8,15 @@ module Raft.AppendEntries
   , appendEntries
   ) where
 
-import           Control.Distributed.Process (NodeId, Process, getSelfNode,
-                                              match, nsendRemote, receiveWait)
-import           Data.List                   (find)
+import           Control.Concurrent.MVar.Lifted (MVar, modifyMVar_, readMVar)
+import           Control.Distributed.Process    (NodeId, Process, getSelfNode,
+                                                 match, nsendRemote,
+                                                 receiveWait)
+import           Data.List                      (find)
 
 import           Raft.Types
-import           Raft.Utils                  (getNextIndex, nextRandomNum,
-                                              updCurrentTerm)
+import           Raft.Utils                     (getNextIndex, nextRandomNum,
+                                                 updCurrentTerm)
 
 newClientEntry :: ServerState -> ServerState
 newClientEntry st = st { currLog  = entry : oldLog }
@@ -27,8 +29,15 @@ newClientEntry st = st { currLog  = entry : oldLog }
                           , logIndex = getNextIndex oldLog
                           }
 
-sendAppendEntries :: NodeId -> Int -> ServerState -> Process ()
-sendAppendEntries peer idx st = do
+sendAppendEntries :: MVar ServerState -> NodeId -> Int -> Process ()
+sendAppendEntries mx peer idx = do
+  st <- readMVar mx
+  let prevIdx = pred idx
+      entry   = find ((== prevIdx) . logIndex) $ currLog st
+      prevTerm
+        | prevIdx == 0    = 0
+        | Just e <- entry = logTerm e
+        | otherwise       = error "inconsistent log"
   node <- getSelfNode
   nsendRemote peer raftServerName
     AppendEntriesReq { areqTerm     = currTerm st
@@ -38,52 +47,51 @@ sendAppendEntries peer idx st = do
                      , areqEntries  = []
                      , leaderCommit = commitIndex st
                      }
-    where prevIdx = pred idx
-          entry   = find ((== prevIdx) . logIndex) $ currLog st
-          prevTerm
-            | prevIdx == 0    = 0
-            | Just e <- entry = logTerm e
-            | otherwise       = error "inconsistent leader log"
 
-collectCommits :: ServerState -> Int -> Process ServerState
-collectCommits st 0 = return st
-collectCommits st n =
+collectCommits :: MVar ServerState -> Int -> Process ()
+collectCommits _  0 = return ()
+collectCommits mx n =
   receiveWait
   [ match $ \(res :: AppendEntriesRes) -> do
-      let term = aresTerm res
+      term <- currTerm <$> readMVar mx
       case () of
-        _ | term > currTerm st -> do
-              let newSt = updCurrentTerm term st
-              return newSt { currRole = Follower }
-        _ | aresSuccess res    -> collectCommits st (pred n)
-        _                      -> collectCommits st n
-  ]
+        _ | aresTerm res > term -> do
+              updCurrentTerm mx (aresTerm res)
+              modifyMVar_ mx $ \st -> return st { currRole = Follower }
+        _ | aresSuccess res     -> collectCommits mx (pred n)
+        _                       -> collectCommits mx n
+    ]
 
-appendEntries :: AppendEntriesReq -> ServerState -> Process ServerState
-appendEntries req st
-  | areqTerm req < term = append False
-  | idx == 0            = append True
-  | (e : _) <- oldLog
-  , logIndex e == idx   = if logTerm e == prevLogTerm req
-                          then append True
-                          else do updSt <- append False
-                                  return updSt { currLog = tail oldLog }
-  | otherwise           = append False
-  where term    = currTerm st
-        idx     = prevLogIndex req
-        oldLog  = dropWhile ((> idx) . logIndex) $ currLog st
-        entries = areqEntries req
+appendEntries :: MVar ServerState -> AppendEntriesReq -> Process ()
+appendEntries mx req = do
+  st <- readMVar mx
+  let term       = currTerm st
+      idx        = prevLogIndex req
+      oldLog     = dropWhile ((> idx) . logIndex) $ currLog st
+      entries    = areqEntries req
+      result res = AppendEntriesRes { aresTerm    = term
+                                    , aresSuccess = res
+                                    }
+  case () of
+    _ | areqTerm req < term -> reply $ result False
+    _ | idx == 0            -> do
+          reply $ result True
+          modifyMVar_ mx $ return . updCommits . setLog entries
+    _ | (e : _) <- oldLog
+      , logIndex e == idx   ->
+          if logTerm e == prevLogTerm req
+          then do reply $ result True
+                  modifyMVar_ mx
+                    $ return . updCommits . setLog (entries ++ oldLog)
+          else do reply $ result False
+                  modifyMVar_ mx $ \s -> return s { currLog = tail oldLog }
+    _                       -> reply $ result False
+  where
+    reply = nsendRemote (leaderId req) raftServerName
 
-        append res = do nsendRemote (leaderId req) raftServerName
-                          AppendEntriesRes { aresTerm    = term
-                                           , aresSuccess = res
-                                           }
-                        return $ if res
-                                 then updCommitIndex
-                                      $ st { currLog = entries ++ oldLog }
-                                 else st
+    setLog entries st = st { currLog = entries }
 
-        updCommitIndex updSt = updSt { commitIndex = n }
-          where n = case currLog updSt of
-                      []      -> 0
-                      (e : _) -> min (leaderCommit req) (logIndex e)
+    updCommits st = st { commitIndex = n }
+      where n = case currLog st of
+                  []      -> 0
+                  (e : _) -> min (leaderCommit req) (logIndex e)
