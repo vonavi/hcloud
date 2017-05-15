@@ -18,9 +18,9 @@ executable hcloud
   main-is:             Main.hs
   other-modules:       Parameters
                        Raft
-                       Raft.AppendEntries
-                       Raft.RequestVote
-                       Raft.Roles
+                       Raft.Candidate
+                       Raft.Follower
+                       Raft.Leader
                        Raft.Types
                        Raft.Utils
                        Types

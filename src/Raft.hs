@@ -11,7 +11,9 @@ import           Control.Distributed.Process    (NodeId, Process, getSelfPid,
 import           Control.Monad                  (forever)
 import           Data.Word                      (Word32)
 
-import           Raft.Roles
+import           Raft.Candidate                 (candidate)
+import           Raft.Follower                  (follower)
+import           Raft.Leader                    (leader)
 import           Raft.Types
 
 initRaft :: [NodeId] -> Word32 -> Process ()
@@ -28,6 +30,6 @@ initRaft peers seed = do
                             }
   getSelfPid >>= register raftServerName
   forever $ (currRole <$> readMVar mx) >>= \case
-    Follower  -> follower mx
-    Candidate -> candidate mx peers
     Leader    -> leader mx peers
+    Candidate -> candidate mx peers
+    Follower  -> follower mx

@@ -2,14 +2,20 @@ module Raft.Utils
   (
     updCurrentTerm
   , incCurrentTerm
+  , remindTimeout
   , randomElectionTimeout
   , getNextIndex
   , nextRandomNum
   ) where
 
+import           Control.Concurrent.Lifted                    (threadDelay)
 import           Control.Concurrent.MVar.Lifted               (MVar, modifyMVar,
                                                                modifyMVar_)
-import           Control.Distributed.Process                  (Process, liftIO)
+import           Control.Distributed.Process                  (Process,
+                                                               ProcessId,
+                                                               getSelfPid,
+                                                               liftIO, send,
+                                                               spawnLocal)
 import           Control.Distributed.Process.MonadBaseControl ()
 import           Data.Bits                                    (shiftL, shiftR,
                                                                xor)
@@ -32,6 +38,13 @@ incCurrentTerm mx = modifyMVar mx $ return . updater
                 updSt   = st { currTerm = updTerm
                              , votedFor = Nothing
                              }
+
+remindTimeout :: Int -> Process ProcessId
+remindTimeout micros = do
+  pid <- getSelfPid
+  spawnLocal $ do
+    liftIO $ threadDelay micros
+    send pid RemindTimeout
 
 randomElectionTimeout :: Int -> Process Int
 randomElectionTimeout base =
