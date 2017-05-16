@@ -29,6 +29,7 @@ executable hcloud
                      , base                              >=4.7  && <5
                      , binary                            >=0.8  && <0.9
                      , bytestring                        >=0.10 && <0.11
+                     , containers                        >=0.5  && <0.6
                      , distributed-process               >=0.6  && <0.7
                      , distributed-process-monad-control >=0.5  && <0.6
                      , lifted-base                       >=0.2  && <0.3
@@ -36,6 +37,8 @@ executable hcloud
                      , network-transport-tcp             >=0.5  && <0.6
                      , optparse-applicative              >=0.13 && <0.14
                      , random                            >=1.1  && <1.2
+                     , random-shuffle                    >=0.0  && <0.1
+                     , transformers                      >=0.5  && <0.6
   ghc-options:         -Wall
                        -O2
                        -threaded

@@ -16,7 +16,7 @@ getParameters = info p idm
         runHelper = info (RunParams <$> getConfig)
                     ( fullDesc <> header "Run Cloud Haskell" )
 
-        testHelper = info (TestParams <$> getConfig <*> getNodeEndPoint)
+        testHelper = info (TestParams <$> getConfig)
                      ( fullDesc <> header "Test Cloud Haskell" )
 
 getConfig :: Parser Config
@@ -33,8 +33,3 @@ getConfig = Config
             <*> strOption ( long "config"
                             <> metavar "FILE"
                             <> help "Configuration file with nodes" )
-
-getNodeEndPoint :: Parser NodeEndPoint
-getNodeEndPoint = option auto ( long "node"
-                                <> metavar "HOST:PORT"
-                                <> help "Node endpoint parameters" )

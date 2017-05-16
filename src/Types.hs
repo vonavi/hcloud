@@ -1,19 +1,17 @@
-{-# LANGUAGE DeriveGeneric #-}
-
 module Types
   (
     NodeEndPoint(..)
   , Config(..)
   , Parameters(..)
-  , StopMessage(..)
+  , NodeConfig(..)
   , receiverName
   ) where
 
-import           Data.Binary                  (Binary)
-import           Data.Char                    (isDigit)
-import           Data.Typeable                (Typeable)
-import           Data.Word                    (Word32)
-import           GHC.Generics                 (Generic)
+import           Control.Distributed.Process      (NodeId)
+import           Control.Distributed.Process.Node (LocalNode)
+import           Data.Char                        (isDigit)
+import qualified Data.Map.Strict                  as M
+import           Data.Word                        (Word32)
 import           Text.ParserCombinators.ReadP
 
 type Host         = String
@@ -36,10 +34,13 @@ data Config = Config { sendPeriod  :: Int
                      }
 
 data Parameters = RunParams Config
-                | TestParams Config NodeEndPoint
+                | TestParams Config
 
-data StopMessage = StopMessage deriving (Typeable, Generic)
-instance Binary StopMessage
+data NodeConfig = NodeConfig { stopEpts  :: [NodeEndPoint]
+                             , startEpts :: [NodeEndPoint]
+                             , allNodes  :: [NodeId]
+                             , nodeMap   :: M.Map NodeId LocalNode
+                             }
 
 receiverName :: String
 receiverName = "receiver"
