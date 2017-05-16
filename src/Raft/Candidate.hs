@@ -14,7 +14,7 @@ import           Data.Foldable                  (forM_)
 import           Raft.Types
 import           Raft.Utils                     (incCurrentTerm,
                                                  randomElectionTimeout,
-                                                 remindTimeout, updCurrentTerm)
+                                                 remindTimeout, syncWithTerm)
 
 candidate :: MVar ServerState -> [NodeId] -> Process ()
 candidate mx peers = do
@@ -42,9 +42,8 @@ collectVotes mx n =
   , match $ \(res :: RequestVoteRes) -> do
       term <- currTerm <$> readMVar mx
       case () of
-        _ | vresTerm res > term -> do
-              updCurrentTerm mx (vresTerm res)
-              modifyMVar_ mx $ \st -> return st { currRole = Follower }
-        _ | voteGranted res    -> collectVotes mx (pred n)
-        _                      -> collectVotes mx n
+        _ | vresTerm res > term  -> syncWithTerm mx (vresTerm res)
+        _ | vresTerm res == term
+          , voteGranted res      -> collectVotes mx (pred n)
+        _                        -> collectVotes mx n
   ]

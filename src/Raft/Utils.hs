@@ -1,6 +1,7 @@
 module Raft.Utils
   (
-    updCurrentTerm
+    whenUpdatedTerm
+  , syncWithTerm
   , incCurrentTerm
   , remindTimeout
   , randomElectionTimeout
@@ -10,24 +11,32 @@ module Raft.Utils
 
 import           Control.Concurrent.Lifted                    (threadDelay)
 import           Control.Concurrent.MVar.Lifted               (MVar, modifyMVar,
-                                                               modifyMVar_)
+                                                               modifyMVar_,
+                                                               readMVar)
 import           Control.Distributed.Process                  (Process,
                                                                ProcessId,
                                                                getSelfPid,
                                                                liftIO, send,
                                                                spawnLocal)
 import           Control.Distributed.Process.MonadBaseControl ()
+import           Control.Monad                                (when)
 import           Data.Bits                                    (shiftL, shiftR,
                                                                xor)
 import           System.Random                                (randomRIO)
 
 import           Raft.Types
 
-updCurrentTerm :: MVar ServerState -> Term -> Process ()
-updCurrentTerm mx term = modifyMVar_ mx $ return . updater
+whenUpdatedTerm :: MVar ServerState -> Term -> Process () -> Process ()
+whenUpdatedTerm mx term act = do
+  stTerm <- currTerm <$> readMVar mx
+  when (term >= stTerm) act
+
+syncWithTerm :: MVar ServerState -> Term -> Process ()
+syncWithTerm mx term = modifyMVar_ mx $ return . updater
   where updater st = if term > currTerm st
                      then st { currTerm = term
                              , votedFor = Nothing
+                             , currRole = Follower
                              }
                      else st
 

@@ -6,7 +6,7 @@ module Raft.Leader
   , newClientEntry
   ) where
 
-import           Control.Concurrent.MVar.Lifted (MVar, modifyMVar_, readMVar)
+import           Control.Concurrent.MVar.Lifted (MVar, readMVar)
 import           Control.Distributed.Process    (NodeId, Process, exit,
                                                  getSelfNode, match,
                                                  nsendRemote, receiveWait,
@@ -16,7 +16,7 @@ import           Data.List                      (find)
 
 import           Raft.Types
 import           Raft.Utils                     (getNextIndex, nextRandomNum,
-                                                 updCurrentTerm)
+                                                 syncWithTerm)
 
 leader :: MVar ServerState -> [NodeId] -> Process ()
 leader mx peers = do
@@ -52,11 +52,10 @@ collectCommits mx n =
   [ match $ \(res :: AppendEntriesRes) -> do
       term <- currTerm <$> readMVar mx
       case () of
-        _ | aresTerm res > term -> do
-              updCurrentTerm mx (aresTerm res)
-              modifyMVar_ mx $ \st -> return st { currRole = Follower }
-        _ | aresSuccess res     -> collectCommits mx (pred n)
-        _                       -> collectCommits mx n
+        _ | aresTerm res > term  -> syncWithTerm mx (aresTerm res)
+        _ | aresTerm res == term
+          , aresSuccess res      -> collectCommits mx (pred n)
+        _                        -> collectCommits mx n
     ]
 
 newClientEntry :: ServerState -> ServerState

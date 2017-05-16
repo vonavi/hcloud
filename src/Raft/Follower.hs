@@ -11,7 +11,8 @@ import           Control.Distributed.Process    (Process, exit, match,
 
 import           Raft.Types
 import           Raft.Utils                     (randomElectionTimeout,
-                                                 remindTimeout, updCurrentTerm)
+                                                 remindTimeout, syncWithTerm,
+                                                 whenUpdatedTerm)
 
 follower :: MVar ServerState -> Process ()
 follower mx = do
@@ -31,44 +32,45 @@ follower mx = do
             modifyMVar_ mx $ \st -> return st { currRole = Candidate }
 
         , match $ \(req :: AppendEntriesReq) -> do
-            updCurrentTerm mx (areqTerm req)
-            appendEntries mx req
+            let term = areqTerm req
+            whenUpdatedTerm mx term $
+              syncWithTerm mx term >> appendEntries mx req
 
         , match $ \(req :: RequestVoteReq) -> do
-            updCurrentTerm mx (vreqTerm req)
+            let term = vreqTerm req
+            whenUpdatedTerm mx term $ do
+              syncWithTerm mx term
 
-            response <- responseVote req <$> readMVar mx
-            let candId = vreqCandidateId req
-            nsendRemote candId raftServerName response
-            if voteGranted response
-              then modifyMVar_ mx $ \st -> return st { votedFor = Just candId }
-              else respondToServers
+              response <- responseVote req <$> readMVar mx
+              let candId = vreqCandidateId req
+              nsendRemote candId raftServerName response
+              if voteGranted response
+                then modifyMVar_ mx $ \st -> return st { votedFor = Just candId }
+                else respondToServers
         ]
 
 appendEntries :: MVar ServerState -> AppendEntriesReq -> Process ()
 appendEntries mx req = do
   st <- readMVar mx
-  let term       = currTerm st
-      idx        = prevLogIndex req
+  let idx        = prevLogIndex req
       oldLog     = dropWhile ((> idx) . logIndex) $ currLog st
       entries    = areqEntries req
-      result res = AppendEntriesRes { aresTerm    = term
+      result res = AppendEntriesRes { aresTerm    = currTerm st
                                     , aresSuccess = res
                                     }
   case () of
-    _ | areqTerm req < term -> reply $ result False
-    _ | idx == 0            -> do
-          reply $ result True
-          modifyMVar_ mx $ return . updCommits . setLog entries
+    _ | idx == 0
+        -> do reply $ result True
+              modifyMVar_ mx $ return . updCommits . setLog entries
     _ | (e : _) <- oldLog
-      , logIndex e == idx   ->
-          if logTerm e == prevLogTerm req
-          then do reply $ result True
-                  modifyMVar_ mx
-                    $ return . updCommits . setLog (entries ++ oldLog)
-          else do reply $ result False
-                  modifyMVar_ mx $ \s -> return s { currLog = tail oldLog }
-    _                       -> reply $ result False
+      , logIndex e == idx
+        -> if logTerm e == prevLogTerm req
+           then do reply $ result True
+                   modifyMVar_ mx
+                     $ return . updCommits . setLog (entries ++ oldLog)
+           else do reply $ result False
+                   modifyMVar_ mx $ \s -> return s { currLog = tail oldLog }
+    _   -> reply $ result False
   where
     reply = nsendRemote (leaderId req) raftServerName
 
@@ -83,9 +85,6 @@ responseVote :: RequestVoteReq -> ServerState -> RequestVoteRes
 responseVote req st = RequestVoteRes { vresTerm    = currTerm st
                                      , voteGranted = granted
                                      }
-  where granted
-          | vreqTerm req < currTerm st = False
-          | otherwise                  =
-              case votedFor st of
-                Nothing     -> True
-                Just candId -> candId == vreqCandidateId req
+  where granted = case votedFor st of
+                    Nothing     -> True
+                    Just candId -> candId == vreqCandidateId req
