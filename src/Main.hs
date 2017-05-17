@@ -10,7 +10,7 @@ import           Control.Concurrent               (forkIO, killThread,
 import           Control.Concurrent.Async         (forConcurrently)
 import           Control.Distributed.Process      (NodeId (..), liftIO,
                                                    spawnLocal)
-import           Control.Distributed.Process.Node (LocalNode, closeLocalNode,
+import           Control.Distributed.Process.Node (closeLocalNode,
                                                    initRemoteTable,
                                                    newLocalNode, runProcess)
 import           Control.Monad                    (forM_, forever, void)
@@ -20,7 +20,8 @@ import           Data.List                        (delete)
 import qualified Data.Map.Strict                  as M
 import           System.Random.Shuffle            (shuffleM)
 
-import           Network.Transport                (EndPointAddress (..))
+import           Network.Transport                (EndPointAddress (..),
+                                                   closeTransport)
 import           Network.Transport.TCP            (createTransport,
                                                    defaultTCPParameters)
 import           Options.Applicative              (execParser)
@@ -35,11 +36,11 @@ main = execParser getParameters >>= \case
   RunParams cfg -> do
     nodeEndPoints <- map read . lines <$> readFile (nodeConf cfg)
     let nidList = map mkNodeId nodeEndPoints
-    nodes <- forConcurrently nodeEndPoints
-      $ \ept -> do let peers = delete (mkNodeId ept) nidList
-                   startLocalNode ept peers cfg
+    connections <- forConcurrently nodeEndPoints
+                   $ \ept -> do let peers = delete (mkNodeId ept) nidList
+                                startServer ept peers cfg
     waitForSeconds $ sendPeriod cfg + gracePeriod cfg
-    mapM_ closeLocalNode nodes
+    mapM_ stopServer connections
 
   TestParams cfg -> do
     nodeEndPoints <- map read . lines <$> readFile (nodeConf cfg)
@@ -52,13 +53,16 @@ main = execParser getParameters >>= \case
     waitForSeconds $ sendPeriod cfg + gracePeriod cfg
     killThread tid
 
-startLocalNode :: NodeEndPoint -> [NodeId] -> Config -> IO LocalNode
-startLocalNode ept peers cfg = do
+startServer :: NodeEndPoint -> [NodeId] -> Config -> IO Connection
+startServer ept peers cfg = do
   tr   <- either (error . show) id
           <$> createTransport (getHost ept) (getPort ept) defaultTCPParameters
   node <- newLocalNode tr initRemoteTable
   runProcess node . void . spawnLocal $ initRaft peers (msgSeed cfg)
-  return node
+  return (tr, node)
+
+stopServer :: Connection -> IO ()
+stopServer (tr, node) = closeTransport tr >> closeLocalNode node
 
 runTest :: Config -> StateT NodeConfig IO ()
 runTest cfg = forever $ do
@@ -74,8 +78,8 @@ runTest cfg = forever $ do
     GT -> do (up, down) <- liftIO $ randomSplit delta (stopEpts nodeCfg)
              kvs        <- liftIO $ forConcurrently up $ \ept -> do
                let nid = mkNodeId ept
-               node <- startLocalNode ept (delete nid $ allNodes nodeCfg) cfg
-               return (nid, node)
+               conn <- startServer ept (delete nid $ allNodes nodeCfg) cfg
+               return (nid, conn)
              let updMap = foldr (uncurry M.insert) (nodeMap nodeCfg) kvs
              put nodeCfg { stopEpts  = down
                          , startEpts = up ++ startEpts nodeCfg
@@ -85,8 +89,8 @@ runTest cfg = forever $ do
     LT -> do (down, up) <- liftIO
                            $ randomSplit (negate delta) (startEpts nodeCfg)
              liftIO . forM_ down $ \ept -> do
-               let node = nodeMap nodeCfg M.! mkNodeId ept
-               closeLocalNode node
+               let conn = nodeMap nodeCfg M.! mkNodeId ept
+               stopServer conn
              let updMap = foldr (M.delete . mkNodeId) (nodeMap nodeCfg) down
              put nodeCfg { stopEpts  = down ++ stopEpts nodeCfg
                          , startEpts = up

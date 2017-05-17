@@ -3,6 +3,7 @@ module Types
     NodeEndPoint(..)
   , Config(..)
   , Parameters(..)
+  , Connection
   , NodeConfig(..)
   , receiverName
   ) where
@@ -12,6 +13,7 @@ import           Control.Distributed.Process.Node (LocalNode)
 import           Data.Char                        (isDigit)
 import qualified Data.Map.Strict                  as M
 import           Data.Word                        (Word32)
+import           Network.Transport                (Transport)
 import           Text.ParserCombinators.ReadP
 
 type Host         = String
@@ -36,10 +38,11 @@ data Config = Config { sendPeriod  :: Int
 data Parameters = RunParams Config
                 | TestParams Config
 
+type Connection = (Transport, LocalNode)
 data NodeConfig = NodeConfig { stopEpts  :: [NodeEndPoint]
                              , startEpts :: [NodeEndPoint]
                              , allNodes  :: [NodeId]
-                             , nodeMap   :: M.Map NodeId LocalNode
+                             , nodeMap   :: M.Map NodeId Connection
                              }
 
 receiverName :: String
