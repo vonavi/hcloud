@@ -11,6 +11,9 @@ module Raft.Utils
   , nextRandomNum
   , newLogger
   , writeLogger
+  , newMailbox
+  , registerMailbox
+  , putMessages
   ) where
 
 import           Control.Concurrent                           (forkIO)
@@ -21,6 +24,11 @@ import           Control.Concurrent.Lifted                    (threadDelay)
 import           Control.Concurrent.MVar.Lifted               (MVar, modifyMVar,
                                                                modifyMVar_,
                                                                readMVar)
+import           Control.Concurrent.STM                       (atomically,
+                                                               check)
+import           Control.Concurrent.STM.TMVar                 (isEmptyTMVar,
+                                                               newEmptyTMVar,
+                                                               putTMVar)
 import           Control.Distributed.Process                  (Process,
                                                                ProcessId,
                                                                getSelfPid,
@@ -35,8 +43,9 @@ import           Data.Bits                                    (shiftL, shiftR,
 import           Data.Time.Clock                              (getCurrentTime)
 import           Data.Time.Format                             (defaultTimeLocale,
                                                                formatTime)
-import           System.IO                                    (hPutStrLn,
-                                                               stderr)
+import           System.IO                                    (hFlush,
+                                                               hPutStrLn,
+                                                               stderr, stdout)
 import           System.Random                                (randomRIO)
 
 import           Raft.Types
@@ -89,9 +98,8 @@ nextRandomNum (Xorshift32 a) = Xorshift32 d
 newLogger :: IO (Chan String)
 newLogger = do
   logs <- newChan
-  void . forkIO . forever $ do
-    msg <- readChan logs
-    hPutStrLn stderr msg
+  void . forkIO . forever
+    $ readChan logs >>= hPutStrLn stderr >> hFlush stderr
   return logs
 
 writeLogger :: Chan String -> String -> Process ()
@@ -100,3 +108,21 @@ writeLogger logs str = do
   pid <- getSelfPid
   liftIO . writeChan logs
     $ formatTime defaultTimeLocale "%c" now ++ " " ++ show pid ++ ": " ++ str
+
+newMailbox :: IO Mailbox
+newMailbox = do
+  now <- atomically newEmptyTMVar
+  box <- newChan
+  void . forkIO . forever $ readChan box >>= print >> hFlush stdout
+  return Mailbox { putMsg = now
+                 , msgBox = box
+                 }
+
+registerMailbox :: MVar ServerState -> Mailbox -> Process ()
+registerMailbox mx mailbox = void . spawnLocal . liftIO $ do
+  atomically $ isEmptyTMVar (putMsg mailbox) >>= check . not
+  entries <- currLog <$> readMVar mx
+  writeChan (msgBox mailbox) entries
+
+putMessages :: Mailbox -> IO ()
+putMessages mailbox = atomically $ putTMVar (putMsg mailbox) ()

@@ -2,7 +2,8 @@
 
 module Raft.Types
   (
-    Xorshift32(..)
+    RaftParams(..)
+  , Xorshift32(..)
   , Term
   , LeaderId
   , Role(..)
@@ -13,20 +14,28 @@ module Raft.Types
   , AppendEntriesReq(..)
   , AppendEntriesRes(..)
   , RemindTimeout(..)
+  , Mailbox(..)
   , raftServerName
   , electionTimeoutMs
   , sendIntervalMs
   ) where
 
-import           Control.Concurrent.Chan     (Chan)
-import           Control.Distributed.Process (NodeId)
-import           Data.Binary                 (Binary)
-import           Data.Typeable               (Typeable)
-import           Data.Word                   (Word32)
-import           GHC.Generics                (Generic)
+import           Control.Concurrent.Chan      (Chan)
+import           Control.Concurrent.STM.TMVar (TMVar)
+import           Control.Distributed.Process  (NodeId)
+import           Data.Binary                  (Binary)
+import           Data.Typeable                (Typeable)
+import           Data.Word                    (Word32)
+import           GHC.Generics                 (Generic)
+
+data RaftParams = RaftParams { raftPeers   :: [NodeId]
+                             , raftSeed    :: Word32
+                             , raftLogger  :: Chan String
+                             , raftMailbox :: Mailbox
+                             }
 
 newtype Xorshift32 = Xorshift32 { getWord32 :: Word32 }
-                   deriving (Typeable, Generic)
+                   deriving (Show, Typeable, Generic)
 instance Binary Xorshift32
 
 type Term     = Int
@@ -37,7 +46,7 @@ data LogEntry = LogEntry { logSeed  :: Xorshift32
                          , logTerm  :: Term
                          , logIndex :: Int
                          }
-              deriving (Typeable, Generic)
+              deriving (Show, Typeable, Generic)
 instance Binary LogEntry
 
 data ServerState = ServerState { currTerm    :: Term
@@ -49,7 +58,7 @@ data ServerState = ServerState { currTerm    :: Term
                                , nextIndex   :: [(NodeId, Int)]
                                , matchIndex  :: [(NodeId, Int)]
                                , initSeed    :: Xorshift32
-                               , raftLogger  :: Chan String
+                               , selfLogger  :: Chan String
                                }
 
 data RequestVoteReq = RequestVoteReq
@@ -86,6 +95,10 @@ instance Binary AppendEntriesRes
 
 data RemindTimeout = RemindTimeout deriving (Typeable, Generic)
 instance Binary RemindTimeout
+
+data Mailbox = Mailbox { putMsg :: TMVar ()
+                       , msgBox :: Chan [LogEntry]
+                       }
 
 raftServerName :: String
 raftServerName = "raft"

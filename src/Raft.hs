@@ -5,20 +5,19 @@ module Raft
     initRaft
   ) where
 
-import           Control.Concurrent.Chan        (Chan)
 import           Control.Concurrent.MVar.Lifted (newMVar, readMVar)
-import           Control.Distributed.Process    (NodeId, Process, getSelfPid,
-                                                 register)
+import           Control.Distributed.Process    (Process, getSelfPid, register)
 import           Control.Monad                  (forever)
-import           Data.Word                      (Word32)
 
 import           Raft.Candidate                 (candidate)
 import           Raft.Follower                  (follower)
 import           Raft.Leader                    (leader)
 import           Raft.Types
+import           Raft.Utils                     (registerMailbox)
 
-initRaft :: [NodeId] -> Word32 -> Chan String -> Process ()
-initRaft peers seed logs = do
+initRaft :: RaftParams -> Process ()
+initRaft params = do
+  let peers = raftPeers params
   mx <- newMVar ServerState { currTerm    = 0
                             , votedFor    = Nothing
                             , currRole    = Follower
@@ -27,9 +26,10 @@ initRaft peers seed logs = do
                             , lastApplied = 0
                             , nextIndex   = zip peers $ repeat 1
                             , matchIndex  = zip peers $ repeat 0
-                            , initSeed    = Xorshift32 seed
-                            , raftLogger  = logs
+                            , initSeed    = Xorshift32 $ raftSeed params
+                            , selfLogger  = raftLogger params
                             }
+  registerMailbox mx (raftMailbox params)
   getSelfPid >>= register raftServerName
   forever $ currRole <$> readMVar mx >>= \case
     Leader    -> leader mx peers

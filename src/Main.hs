@@ -30,42 +30,52 @@ import           System.Random.Shuffle            (shuffleM)
 
 import           Parameters                       (getParameters)
 import           Raft                             (initRaft)
-import           Raft.Utils                       (newLogger, writeLogger)
+import           Raft.Types                       (Mailbox (..),
+                                                   RaftParams (..))
+import           Raft.Utils                       (newLogger, newMailbox,
+                                                   putMessages, writeLogger)
 import           Types
 
 main :: IO ()
-main = execParser getParameters >>= \case
-  RunParams cfg -> do
-    nodeEndPoints <- map read . lines <$> readFile (nodeConf cfg)
-    logs          <- newLogger
-    let nidList = map mkNodeId nodeEndPoints
-    connections <- forConcurrently nodeEndPoints
-                   $ \ept -> do let peers = delete (mkNodeId ept) nidList
-                                startServer peers (msgSeed cfg) logs ept
-    waitForSeconds $ sendPeriod cfg + gracePeriod cfg
-    mapM_ (stopServer logs) connections
+main = do
+  logs    <- newLogger
+  mailbox <- newMailbox
+  execParser getParameters >>= \case
+    RunParams cfg -> do
+      nodeEndPoints <- map read . lines <$> readFile (nodeConf cfg)
+      let nidList = map mkNodeId nodeEndPoints
+      connections <- forConcurrently nodeEndPoints $ \ept -> do
+        let params = RaftParams
+                     { raftPeers   = delete (mkNodeId ept) nidList
+                     , raftSeed    = msgSeed cfg
+                     , raftLogger  = logs
+                     , raftMailbox = mailbox
+                     }
+        startServer params ept
+      sendThenPutMessages cfg mailbox
+      mapM_ (stopServer logs) connections
 
-  TestParams cfg -> do
-    nodeEndPoints <- map read . lines <$> readFile (nodeConf cfg)
-    logs          <- newLogger
-    let nodeCfg = NodeConfig { stopEpts  = nodeEndPoints
-                             , startEpts = []
-                             , allNodes  = map mkNodeId nodeEndPoints
-                             , nodeMap   = M.empty
-                             }
-    tid <- forkIO . flip evalStateT nodeCfg $ runTest logs (msgSeed cfg)
-    waitForSeconds $ sendPeriod cfg + gracePeriod cfg
-    killThread tid
+    TestParams cfg -> do
+      nodeEndPoints <- map read . lines <$> readFile (nodeConf cfg)
+      let nodeCfg = NodeConfig
+                    { stopEpts  = nodeEndPoints
+                    , startEpts = []
+                    , allNodes  = map mkNodeId nodeEndPoints
+                    , nodeMap   = M.empty
+                    }
+      tid <- forkIO . flip evalStateT nodeCfg
+             $ runTest (msgSeed cfg) logs mailbox
+      sendThenPutMessages cfg mailbox
+      killThread tid
 
-startServer :: [NodeId] -> Word32 -> Chan String -> NodeEndPoint
-            -> IO Connection
-startServer peers seed logs ept = do
+startServer :: RaftParams -> NodeEndPoint -> IO Connection
+startServer params ept = do
   tr   <- either (error . show) id
           <$> createTransport (getHost ept) (getPort ept) defaultTCPParameters
   node <- newLocalNode tr initRemoteTable
   runProcess node $ do
-    writeLogger logs "starting server..."
-    void . spawnLocal $ initRaft peers seed logs
+    writeLogger (raftLogger params) "starting server..."
+    void . spawnLocal $ initRaft params
   return (tr, node)
 
 stopServer :: Chan String -> Connection -> IO ()
@@ -74,8 +84,8 @@ stopServer logs (tr, node) = do
   closeTransport tr
   closeLocalNode node
 
-runTest :: Chan String -> Word32 -> StateT NodeConfig IO ()
-runTest logs seed = forever $ do
+runTest :: Word32 -> Chan String -> Mailbox -> StateT NodeConfig IO ()
+runTest seed logs mailbox = forever $ do
   nodeCfg <- get
   -- The majority of nodes should be always connected
   let n = length $ allNodes nodeCfg
@@ -87,9 +97,14 @@ runTest logs seed = forever $ do
 
     GT -> do (up, down) <- liftIO $ randomSplit delta (stopEpts nodeCfg)
              kvs        <- liftIO $ forConcurrently up $ \ept -> do
-               let nid   = mkNodeId ept
-                   peers = delete nid $ allNodes nodeCfg
-               conn <- startServer peers seed logs ept
+               let nid    = mkNodeId ept
+                   params = RaftParams
+                            { raftPeers   = delete nid $ allNodes nodeCfg
+                            , raftSeed    = seed
+                            , raftLogger  = logs
+                            , raftMailbox = mailbox
+                            }
+               conn <- startServer params ept
                return (nid, conn)
              let updMap = foldr (uncurry M.insert) (nodeMap nodeCfg) kvs
              put nodeCfg { stopEpts  = down
@@ -110,12 +125,15 @@ runTest logs seed = forever $ do
   -- Random delay before the next re-connection
   liftIO $ randomRIO (0, 2000) >>= threadDelay . (1000 *)
 
+sendThenPutMessages :: Config -> Mailbox -> IO ()
+sendThenPutMessages cfg mailbox = do
+  threadDelay (1000000 * sendPeriod cfg)
+  putMessages mailbox
+  threadDelay (1000000 * gracePeriod cfg)
+
 randomSplit :: Int -> [a] -> IO ([a], [a])
 randomSplit n = fmap (splitAt n) . shuffleM
 
 mkNodeId :: NodeEndPoint -> NodeId
 mkNodeId (NodeEndPoint host port) = NodeId . EndPointAddress . BC.concat
                                     . map BC.pack $ [host, ":", port, ":0"]
-
-waitForSeconds :: Int -> IO ()
-waitForSeconds = liftIO . threadDelay . (1000000 *)
