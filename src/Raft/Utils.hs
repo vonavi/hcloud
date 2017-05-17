@@ -7,8 +7,14 @@ module Raft.Utils
   , randomElectionTimeout
   , getNextIndex
   , nextRandomNum
+  , newLogQueue
+  , writeLogQueue
   ) where
 
+import           Control.Concurrent                           (forkIO)
+import           Control.Concurrent.Chan                      (Chan, newChan,
+                                                               readChan,
+                                                               writeChan)
 import           Control.Concurrent.Lifted                    (threadDelay)
 import           Control.Concurrent.MVar.Lifted               (MVar, modifyMVar,
                                                                modifyMVar_,
@@ -19,9 +25,15 @@ import           Control.Distributed.Process                  (Process,
                                                                liftIO, send,
                                                                spawnLocal)
 import           Control.Distributed.Process.MonadBaseControl ()
-import           Control.Monad                                (when)
+import           Control.Monad                                (forever, void,
+                                                               when)
 import           Data.Bits                                    (shiftL, shiftR,
                                                                xor)
+import           Data.Time.Clock                              (getCurrentTime)
+import           Data.Time.Format                             (formatTime)
+import           Data.Time.Format                             (defaultTimeLocale)
+import           System.IO                                    (hPutStrLn,
+                                                               stderr)
 import           System.Random                                (randomRIO)
 
 import           Raft.Types
@@ -69,3 +81,16 @@ nextRandomNum (Xorshift32 a) = Xorshift32 d
   where b = a `xor` shiftL a 13
         c = b `xor` shiftR b 17
         d = c `xor` shiftL c 5
+
+newLogQueue :: IO (Chan String)
+newLogQueue = do
+  queue <- newChan
+  void . forkIO . forever $ do
+    msg <- readChan queue
+    hPutStrLn stderr msg
+  return queue
+
+writeLogQueue :: Chan String -> String -> IO ()
+writeLogQueue queue str = do
+  now <- getCurrentTime
+  writeChan queue $ formatTime defaultTimeLocale "%c" now ++ ": " ++ str

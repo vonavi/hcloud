@@ -18,6 +18,7 @@ module Raft.Types
   , sendIntervalMs
   ) where
 
+import           Control.Concurrent.Chan     (Chan)
 import           Control.Distributed.Process (NodeId)
 import           Data.Binary                 (Binary)
 import           Data.Typeable               (Typeable)
@@ -48,6 +49,7 @@ data ServerState = ServerState { currTerm    :: Term
                                , nextIndex   :: [(NodeId, Int)]
                                , matchIndex  :: [(NodeId, Int)]
                                , initSeed    :: Xorshift32
+                               , logQueue    :: Chan String
                                }
 
 data RequestVoteReq = RequestVoteReq
