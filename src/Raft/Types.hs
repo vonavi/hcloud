@@ -49,7 +49,7 @@ data ServerState = ServerState { currTerm    :: Term
                                , nextIndex   :: [(NodeId, Int)]
                                , matchIndex  :: [(NodeId, Int)]
                                , initSeed    :: Xorshift32
-                               , logQueue    :: Chan String
+                               , raftLogger  :: Chan String
                                }
 
 data RequestVoteReq = RequestVoteReq

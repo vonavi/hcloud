@@ -18,7 +18,7 @@ import           Raft.Leader                    (leader)
 import           Raft.Types
 
 initRaft :: [NodeId] -> Word32 -> Chan String -> Process ()
-initRaft peers seed queue = do
+initRaft peers seed logs = do
   mx <- newMVar ServerState { currTerm    = 0
                             , votedFor    = Nothing
                             , currRole    = Follower
@@ -28,7 +28,7 @@ initRaft peers seed queue = do
                             , nextIndex   = zip peers $ repeat 1
                             , matchIndex  = zip peers $ repeat 0
                             , initSeed    = Xorshift32 seed
-                            , logQueue    = queue
+                            , raftLogger  = logs
                             }
   getSelfPid >>= register raftServerName
   forever $ currRole <$> readMVar mx >>= \case

@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleContexts #-}
+
 module Raft.Utils
   (
     whenUpdatedTerm
@@ -7,8 +9,8 @@ module Raft.Utils
   , randomElectionTimeout
   , getNextIndex
   , nextRandomNum
-  , newLogQueue
-  , writeLogQueue
+  , newLogger
+  , writeLogger
   ) where
 
 import           Control.Concurrent                           (forkIO)
@@ -27,23 +29,25 @@ import           Control.Distributed.Process                  (Process,
 import           Control.Distributed.Process.MonadBaseControl ()
 import           Control.Monad                                (forever, void,
                                                                when)
+import           Control.Monad.Trans.Control                  (MonadBaseControl)
 import           Data.Bits                                    (shiftL, shiftR,
                                                                xor)
 import           Data.Time.Clock                              (getCurrentTime)
-import           Data.Time.Format                             (formatTime)
-import           Data.Time.Format                             (defaultTimeLocale)
+import           Data.Time.Format                             (defaultTimeLocale,
+                                                               formatTime)
 import           System.IO                                    (hPutStrLn,
                                                                stderr)
 import           System.Random                                (randomRIO)
 
 import           Raft.Types
 
-whenUpdatedTerm :: MVar ServerState -> Term -> Process () -> Process ()
+whenUpdatedTerm :: MonadBaseControl IO m
+                => MVar ServerState -> Term -> m () -> m ()
 whenUpdatedTerm mx term act = do
   stTerm <- currTerm <$> readMVar mx
   when (term >= stTerm) act
 
-syncWithTerm :: MVar ServerState -> Term -> Process ()
+syncWithTerm :: MonadBaseControl IO m => MVar ServerState -> Term -> m ()
 syncWithTerm mx term = modifyMVar_ mx $ return . updater
   where updater st = if term > currTerm st
                      then st { currTerm = term
@@ -52,7 +56,7 @@ syncWithTerm mx term = modifyMVar_ mx $ return . updater
                              }
                      else st
 
-incCurrentTerm :: MVar ServerState -> Process Term
+incCurrentTerm :: MonadBaseControl IO m => MVar ServerState -> m Term
 incCurrentTerm mx = modifyMVar mx $ return . updater
   where updater st = (updSt, updTerm)
           where updTerm = succ $ currTerm st
@@ -64,7 +68,7 @@ remindTimeout :: Int -> Process ProcessId
 remindTimeout micros = do
   pid <- getSelfPid
   spawnLocal $ do
-    liftIO $ threadDelay micros
+    threadDelay micros
     send pid RemindTimeout
 
 randomElectionTimeout :: Int -> Process Int
@@ -82,15 +86,17 @@ nextRandomNum (Xorshift32 a) = Xorshift32 d
         c = b `xor` shiftR b 17
         d = c `xor` shiftL c 5
 
-newLogQueue :: IO (Chan String)
-newLogQueue = do
-  queue <- newChan
+newLogger :: IO (Chan String)
+newLogger = do
+  logs <- newChan
   void . forkIO . forever $ do
-    msg <- readChan queue
+    msg <- readChan logs
     hPutStrLn stderr msg
-  return queue
+  return logs
 
-writeLogQueue :: Chan String -> String -> IO ()
-writeLogQueue queue str = do
-  now <- getCurrentTime
-  writeChan queue $ formatTime defaultTimeLocale "%c" now ++ ": " ++ str
+writeLogger :: Chan String -> String -> Process ()
+writeLogger logs str = do
+  now <- liftIO getCurrentTime
+  pid <- getSelfPid
+  liftIO . writeChan logs
+    $ formatTime defaultTimeLocale "%c" now ++ " " ++ show pid ++ ": " ++ str
