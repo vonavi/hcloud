@@ -64,6 +64,7 @@ instance Binary LogVector
 
 data RaftParams = RaftParams { raftPeers   :: [NodeId]
                              , raftSeed    :: Word32
+                             , raftFile    :: FilePath
                              , raftLogger  :: Chan String
                              , raftMailbox :: Mailbox
                              }
@@ -84,6 +85,7 @@ data ServerState = ServerState { currTerm    :: Term
                                , nextIndex   :: [(NodeId, Int)]
                                , matchIndex  :: [(NodeId, Int)]
                                , initSeed    :: Xorshift32
+                               , sessionFile :: FilePath
                                , selfLogger  :: Chan String
                                }
 

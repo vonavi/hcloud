@@ -43,6 +43,7 @@ data NodeConfig = NodeConfig { stopEpts  :: [NodeEndPoint]
                              , startEpts :: [NodeEndPoint]
                              , allNodes  :: [NodeId]
                              , nodeMap   :: M.Map NodeId Connection
+                             , fileMap   :: M.Map NodeId FilePath
                              }
 
 receiverName :: String

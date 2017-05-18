@@ -28,6 +28,7 @@ initRaft params = do
                             , nextIndex   = zip peers $ repeat 1
                             , matchIndex  = zip peers $ repeat 0
                             , initSeed    = Xorshift32 $ raftSeed params
+                            , sessionFile = raftFile params
                             , selfLogger  = raftLogger params
                             }
   registerMailbox mx (raftMailbox params)

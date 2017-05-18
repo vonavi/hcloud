@@ -14,7 +14,7 @@ import           Control.Distributed.Process      (NodeId (..), liftIO,
 import           Control.Distributed.Process.Node (closeLocalNode,
                                                    initRemoteTable,
                                                    newLocalNode, runProcess)
-import           Control.Monad                    (forM_, forever, void)
+import           Control.Monad                    (forM_, forever, void, when)
 import           Control.Monad.Trans.State        (StateT, evalStateT, get, put)
 import qualified Data.ByteString.Char8            as BC
 import           Data.List                        (delete)
@@ -25,6 +25,10 @@ import           Network.Transport                (EndPointAddress (..),
 import           Network.Transport.TCP            (createTransport,
                                                    defaultTCPParameters)
 import           Options.Applicative              (execParser)
+import           System.Directory                 (doesFileExist,
+                                                   getTemporaryDirectory,
+                                                   removeFile)
+import           System.FilePath.Posix            ((</>))
 import           System.Random                    (randomRIO)
 import           System.Random.Shuffle            (shuffleM)
 
@@ -43,30 +47,41 @@ main = do
   execParser getParameters >>= \case
     RunParams cfg -> do
       nodeEndPoints <- map read . lines <$> readFile (nodeConf cfg)
+      files         <- mapM tempSessionFile nodeEndPoints
+      mapM_ rmSessionFile files
       let nidList = map mkNodeId nodeEndPoints
+          storage = M.fromList $ zip nidList files
       connections <- forConcurrently nodeEndPoints $ \ept -> do
-        let params = RaftParams
-                     { raftPeers   = delete (mkNodeId ept) nidList
+        let nid    = mkNodeId ept
+            params = RaftParams
+                     { raftPeers   = delete nid nidList
                      , raftSeed    = msgSeed cfg
+                     , raftFile    = storage M.! nid
                      , raftLogger  = logs
                      , raftMailbox = mailbox
                      }
         startServer params ept
       sendThenPutMessages cfg mailbox
       mapM_ (stopServer logs) connections
+      mapM_ rmSessionFile files
 
     TestParams cfg -> do
       nodeEndPoints <- map read . lines <$> readFile (nodeConf cfg)
-      let nodeCfg = NodeConfig
+      files         <- mapM tempSessionFile nodeEndPoints
+      mapM_ rmSessionFile files
+      let nidList = map mkNodeId nodeEndPoints
+          nodeCfg = NodeConfig
                     { stopEpts  = nodeEndPoints
                     , startEpts = []
-                    , allNodes  = map mkNodeId nodeEndPoints
+                    , allNodes  = nidList
                     , nodeMap   = M.empty
+                    , fileMap   = M.fromList $ zip nidList files
                     }
       tid <- forkIO . flip evalStateT nodeCfg
              $ runTest (msgSeed cfg) logs mailbox
       sendThenPutMessages cfg mailbox
       killThread tid
+      mapM_ rmSessionFile files
 
 startServer :: RaftParams -> NodeEndPoint -> IO Connection
 startServer params ept = do
@@ -101,6 +116,7 @@ runTest seed logs mailbox = forever $ do
                    params = RaftParams
                             { raftPeers   = delete nid $ allNodes nodeCfg
                             , raftSeed    = seed
+                            , raftFile    = fileMap nodeCfg M.! nid
                             , raftLogger  = logs
                             , raftMailbox = mailbox
                             }
@@ -137,3 +153,12 @@ randomSplit n = fmap (splitAt n) . shuffleM
 mkNodeId :: NodeEndPoint -> NodeId
 mkNodeId (NodeEndPoint host port) = NodeId . EndPointAddress . BC.concat
                                     . map BC.pack $ [host, ":", port, ":0"]
+
+tempSessionFile :: NodeEndPoint -> IO FilePath
+tempSessionFile ept = do
+  dir <- getTemporaryDirectory
+  return $ dir </> getHost ept ++ ":" ++ getPort ept ++ ".tmp"
+
+rmSessionFile :: FilePath -> IO ()
+rmSessionFile file = do flag <- doesFileExist file
+                        when flag $ removeFile file
