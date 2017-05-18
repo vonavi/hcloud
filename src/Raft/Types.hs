@@ -1,20 +1,24 @@
-{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveGeneric         #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE TemplateHaskell       #-}
+{-# LANGUAGE TypeFamilies          #-}
 
 module Raft.Types
   (
-    RaftParams(..)
-  , Xorshift32(..)
+    Xorshift32(..)
   , Term
+  , LogEntry(..)
+  , LogVector(..)
+  , RaftParams(..)
+  , Mailbox(..)
   , LeaderId
   , Role(..)
-  , LogEntry(..)
   , ServerState(..)
   , RequestVoteReq(..)
   , RequestVoteRes(..)
   , AppendEntriesReq(..)
   , AppendEntriesRes(..)
   , RemindTimeout(..)
-  , Mailbox(..)
   , raftServerName
   , electionTimeoutMs
   , sendIntervalMs
@@ -25,22 +29,22 @@ import           Control.Concurrent.STM.TMVar (TMVar)
 import           Control.Distributed.Process  (NodeId)
 import           Data.Binary                  (Binary)
 import           Data.Typeable                (Typeable)
+import           Data.Vector.Binary           ()
+import qualified Data.Vector.Unboxed          as U
+import           Data.Vector.Unboxed.Deriving (derivingUnbox)
 import           Data.Word                    (Word32)
 import           GHC.Generics                 (Generic)
-
-data RaftParams = RaftParams { raftPeers   :: [NodeId]
-                             , raftSeed    :: Word32
-                             , raftLogger  :: Chan String
-                             , raftMailbox :: Mailbox
-                             }
 
 newtype Xorshift32 = Xorshift32 { getWord32 :: Word32 }
                    deriving (Show, Typeable, Generic)
 instance Binary Xorshift32
 
-type Term     = Int
-type LeaderId = NodeId
-data Role     = Follower | Candidate | Leader
+derivingUnbox "Xorshift32"
+  [t| Xorshift32 -> Word32 |]
+  [| \(Xorshift32 seed) -> seed |]
+  [| Xorshift32 |]
+
+type Term = Int
 
 data LogEntry = LogEntry { logSeed  :: Xorshift32
                          , logTerm  :: Term
@@ -49,10 +53,32 @@ data LogEntry = LogEntry { logSeed  :: Xorshift32
               deriving (Show, Typeable, Generic)
 instance Binary LogEntry
 
+derivingUnbox "LogEntry"
+  [t| LogEntry -> (Xorshift32, Term, Int) |]
+  [| \(LogEntry seed term idx) -> (seed, term, idx) |]
+  [| \(seed, term, idx) -> LogEntry seed term idx |]
+
+newtype LogVector = LogVector { getLog :: U.Vector LogEntry }
+                  deriving (Show, Typeable, Generic)
+instance Binary LogVector
+
+data RaftParams = RaftParams { raftPeers   :: [NodeId]
+                             , raftSeed    :: Word32
+                             , raftLogger  :: Chan String
+                             , raftMailbox :: Mailbox
+                             }
+
+data Mailbox = Mailbox { putMsg :: TMVar ()
+                       , msgBox :: Chan LogVector
+                       }
+
+type LeaderId = NodeId
+data Role     = Follower | Candidate | Leader
+
 data ServerState = ServerState { currTerm    :: Term
                                , votedFor    :: Maybe LeaderId
                                , currRole    :: Role
-                               , currLog     :: [LogEntry]
+                               , currVec     :: LogVector
                                , commitIndex :: Int
                                , lastApplied :: Int
                                , nextIndex   :: [(NodeId, Int)]
@@ -75,12 +101,13 @@ data RequestVoteRes = RequestVoteRes
                     deriving (Typeable, Generic)
 instance Binary RequestVoteRes
 
+
 data AppendEntriesReq = AppendEntriesReq
                         { areqTerm     :: Term
                         , leaderId     :: LeaderId
                         , prevLogIndex :: Int
                         , prevLogTerm  :: Term
-                        , areqEntries  :: [LogEntry]
+                        , areqEntries  :: LogVector
                         , leaderCommit :: Int
                         }
                       deriving (Typeable, Generic)
@@ -95,10 +122,6 @@ instance Binary AppendEntriesRes
 
 data RemindTimeout = RemindTimeout deriving (Typeable, Generic)
 instance Binary RemindTimeout
-
-data Mailbox = Mailbox { putMsg :: TMVar ()
-                       , msgBox :: Chan [LogEntry]
-                       }
 
 raftServerName :: String
 raftServerName = "raft"

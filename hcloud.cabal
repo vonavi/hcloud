@@ -42,6 +42,9 @@ executable hcloud
                      , stm                               >=2.4  && <2.5
                      , time                              >=1.6  && <1.7
                      , transformers                      >=0.5  && <0.6
+                     , vector                            >=0.11 && <0.12
+                     , vector-binary-instances           >=0.2  && <0.3
+                     , vector-th-unbox                   >=0.2  && <0.3
   ghc-options:         -Wall
                        -O2
                        -threaded

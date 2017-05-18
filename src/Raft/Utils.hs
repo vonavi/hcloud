@@ -43,6 +43,7 @@ import           Data.Bits                                    (shiftL, shiftR,
 import           Data.Time.Clock                              (getCurrentTime)
 import           Data.Time.Format                             (defaultTimeLocale,
                                                                formatTime)
+import qualified Data.Vector.Unboxed                          as U
 import           System.IO                                    (hFlush,
                                                                hPutStrLn,
                                                                stderr, stdout)
@@ -84,9 +85,10 @@ randomElectionTimeout :: Int -> Process Int
 randomElectionTimeout base =
   liftIO $ ((base `div` 1000) *) <$> randomRIO (1000, 2000)
 
-getNextIndex :: [LogEntry] -> Int
-getNextIndex (x : _) = succ $ logIndex x
-getNextIndex _       = 1
+getNextIndex :: LogVector -> Int
+getNextIndex v | U.null logs = 1
+               | otherwise   = succ . logIndex $ U.head logs
+  where logs = getLog v
 
 -- Iterates the random generator for 32 bits
 nextRandomNum :: Xorshift32 -> Xorshift32
@@ -121,7 +123,7 @@ newMailbox = do
 registerMailbox :: MVar ServerState -> Mailbox -> Process ()
 registerMailbox mx mailbox = void . spawnLocal . liftIO $ do
   atomically $ isEmptyTMVar (putMsg mailbox) >>= check . not
-  entries <- currLog <$> readMVar mx
+  entries <- currVec <$> readMVar mx
   writeChan (msgBox mailbox) entries
 
 putMessages :: Mailbox -> IO ()

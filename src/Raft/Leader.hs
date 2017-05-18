@@ -12,7 +12,7 @@ import           Control.Distributed.Process    (NodeId, Process, exit,
                                                  nsendRemote, receiveWait,
                                                  spawnLocal)
 import           Data.Foldable                  (forM_)
-import           Data.List                      (find)
+import qualified Data.Vector.Unboxed            as U
 
 import           Raft.Types
 import           Raft.Utils                     (getNextIndex, nextRandomNum,
@@ -20,7 +20,7 @@ import           Raft.Utils                     (getNextIndex, nextRandomNum,
 
 leader :: MVar ServerState -> [NodeId] -> Process ()
 leader mx peers = do
-  idx    <- getNextIndex . currLog <$> readMVar mx
+  idx    <- getNextIndex . currVec <$> readMVar mx
   sender <- spawnLocal . forM_ peers $ \p -> sendAppendEntries mx p idx
 
   collectCommits mx $ (length peers + 1) `div` 2
@@ -30,7 +30,7 @@ sendAppendEntries :: MVar ServerState -> NodeId -> Int -> Process ()
 sendAppendEntries mx peer idx = do
   st <- readMVar mx
   let prevIdx = pred idx
-      entry   = find ((== prevIdx) . logIndex) $ currLog st
+      entry   = U.find ((== prevIdx) . logIndex) . getLog $ currVec st
       prevTerm
         | prevIdx == 0    = 0
         | Just e <- entry = logTerm e
@@ -41,7 +41,7 @@ sendAppendEntries mx peer idx = do
                      , leaderId     = node
                      , prevLogIndex = prevIdx
                      , prevLogTerm  = prevTerm
-                     , areqEntries  = []
+                     , areqEntries  = LogVector U.empty
                      , leaderCommit = commitIndex st
                      }
 
@@ -59,12 +59,12 @@ collectCommits mx n =
     ]
 
 newClientEntry :: ServerState -> ServerState
-newClientEntry st = st { currLog  = entry : oldLog }
-  where oldLog = currLog st
-        seed   = case oldLog of
-                   (e : _) -> nextRandomNum $ logSeed e
-                   []      -> initSeed st
+newClientEntry st = st { currVec = LogVector $ U.cons entry oldLog }
+  where oldLog = getLog $ currVec st
+        seed   = if U.null oldLog
+                 then initSeed st
+                 else nextRandomNum . logSeed $ U.head oldLog
         entry  = LogEntry { logSeed  = seed
                           , logTerm  = currTerm st
-                          , logIndex = getNextIndex oldLog
+                          , logIndex = getNextIndex $ LogVector oldLog
                           }

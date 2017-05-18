@@ -8,6 +8,7 @@ module Raft
 import           Control.Concurrent.MVar.Lifted (newMVar, readMVar)
 import           Control.Distributed.Process    (Process, getSelfPid, register)
 import           Control.Monad                  (forever)
+import qualified Data.Vector.Unboxed            as U
 
 import           Raft.Candidate                 (candidate)
 import           Raft.Follower                  (follower)
@@ -21,7 +22,7 @@ initRaft params = do
   mx <- newMVar ServerState { currTerm    = 0
                             , votedFor    = Nothing
                             , currRole    = Follower
-                            , currLog     = []
+                            , currVec     = LogVector U.empty
                             , commitIndex = 0
                             , lastApplied = 0
                             , nextIndex   = zip peers $ repeat 1

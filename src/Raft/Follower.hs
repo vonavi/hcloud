@@ -8,6 +8,7 @@ module Raft.Follower
 import           Control.Concurrent.MVar.Lifted (MVar, modifyMVar_, readMVar)
 import           Control.Distributed.Process    (Process, exit, match,
                                                  nsendRemote, receiveWait)
+import qualified Data.Vector.Unboxed            as U
 
 import           Raft.Types
 import           Raft.Utils                     (randomElectionTimeout,
@@ -53,8 +54,9 @@ appendEntries :: MVar ServerState -> AppendEntriesReq -> Process ()
 appendEntries mx req = do
   st <- readMVar mx
   let idx        = prevLogIndex req
-      oldLog     = dropWhile ((> idx) . logIndex) $ currLog st
-      entries    = areqEntries req
+      oldLog     = U.dropWhile ((> idx) . logIndex) . getLog $ currVec st
+      lastEntry  = U.head oldLog
+      entries    = getLog $ areqEntries req
       result res = AppendEntriesRes { aresTerm    = currTerm st
                                     , aresSuccess = res
                                     }
@@ -62,24 +64,26 @@ appendEntries mx req = do
     _ | idx == 0
         -> do reply $ result True
               modifyMVar_ mx $ return . updCommits . setLog entries
-    _ | (e : _) <- oldLog
-      , logIndex e == idx
-        -> if logTerm e == prevLogTerm req
+    _ | not (U.null oldLog)
+      , logIndex lastEntry == idx
+        -> if logTerm lastEntry == prevLogTerm req
            then do reply $ result True
                    modifyMVar_ mx
-                     $ return . updCommits . setLog (entries ++ oldLog)
+                     $ return . updCommits . setLog (entries U.++ oldLog)
            else do reply $ result False
-                   modifyMVar_ mx $ \s -> return s { currLog = tail oldLog }
+                   modifyMVar_ mx
+                     $ \s -> return s { currVec = LogVector (U.tail oldLog) }
     _   -> reply $ result False
   where
     reply = nsendRemote (leaderId req) raftServerName
 
-    setLog entries st = st { currLog = entries }
+    setLog entries st = st { currVec = LogVector entries }
 
     updCommits st = st { commitIndex = n }
-      where n = case currLog st of
-                  []      -> 0
-                  (e : _) -> min (leaderCommit req) (logIndex e)
+      where es = getLog $ currVec st
+            n  = if U.null es
+                 then 0
+                 else min (leaderCommit req) (logIndex $ U.head es)
 
 responseVote :: RequestVoteReq -> ServerState -> RequestVoteRes
 responseVote req st = RequestVoteRes { vresTerm    = currTerm st
