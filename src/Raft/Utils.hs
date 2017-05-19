@@ -14,6 +14,8 @@ module Raft.Utils
   , newMailbox
   , registerMailbox
   , putMessages
+  , saveSession
+  , restoreSession
   ) where
 
 import           Control.Concurrent                           (forkIO)
@@ -29,24 +31,30 @@ import           Control.Concurrent.STM                       (atomically,
 import           Control.Concurrent.STM.TMVar                 (isEmptyTMVar,
                                                                newEmptyTMVar,
                                                                putTMVar)
-import           Control.Distributed.Process                  (Process,
+import           Control.Distributed.Process                  (NodeId (..),
+                                                               Process,
                                                                ProcessId,
                                                                getSelfPid,
                                                                liftIO, send,
                                                                spawnLocal)
 import           Control.Distributed.Process.MonadBaseControl ()
+import           Control.Exception                            (handle, throwIO)
 import           Control.Monad                                (forever, void,
                                                                when)
 import           Control.Monad.Trans.Control                  (MonadBaseControl)
 import           Data.Bits                                    (shiftL, shiftR,
                                                                xor)
+import qualified Data.ByteString.Char8                        as BC
+import           Data.Serialize                               (decode, encode)
 import           Data.Time.Clock                              (getCurrentTime)
 import           Data.Time.Format                             (defaultTimeLocale,
                                                                formatTime)
 import qualified Data.Vector.Unboxed                          as U
+import           Network.Transport                            (EndPointAddress (..))
 import           System.IO                                    (hFlush,
                                                                hPutStrLn,
                                                                stderr, stdout)
+import           System.IO.Error                              (isDoesNotExistError)
 import           System.Random                                (randomRIO)
 
 import           Raft.Types
@@ -128,3 +136,23 @@ registerMailbox mx mailbox = void . spawnLocal . liftIO $ do
 
 putMessages :: Mailbox -> IO ()
 putMessages mailbox = atomically $ putTMVar (putMsg mailbox) ()
+
+saveSession :: MVar ServerState -> Process ()
+saveSession mx = do
+  st <- readMVar mx
+  let term = currTerm st
+      bs   = endPointAddressToByteString . nodeAddress <$> votedFor st
+      logs = currVec st
+  liftIO . BC.writeFile (sessionFile st) $ encode (term, bs, logs)
+
+restoreSession :: FilePath -> Process (Term, Maybe LeaderId, LogVector)
+restoreSession file = do
+  (term, bs, logs) <- liftIO . handle fileHandler
+                      $ either error id . decode <$> BC.readFile file
+  return (term, toVoted bs, logs)
+    where fileHandler e
+            | isDoesNotExistError e = return (0, Nothing, LogVector U.empty)
+            | otherwise             = throwIO e
+
+          toVoted :: Maybe BC.ByteString -> Maybe LeaderId
+          toVoted = fmap (NodeId . EndPointAddress)

@@ -8,12 +8,13 @@ module Raft.Follower
 import           Control.Concurrent.MVar.Lifted (MVar, modifyMVar_, readMVar)
 import           Control.Distributed.Process    (Process, exit, match,
                                                  nsendRemote, receiveWait)
+import           Control.Monad                  (unless, when)
 import qualified Data.Vector.Unboxed            as U
 
 import           Raft.Types
 import           Raft.Utils                     (randomElectionTimeout,
-                                                 remindTimeout, syncWithTerm,
-                                                 whenUpdatedTerm)
+                                                 remindTimeout, saveSession,
+                                                 syncWithTerm, whenUpdatedTerm)
 
 follower :: MVar ServerState -> Process ()
 follower mx = do
@@ -34,49 +35,52 @@ follower mx = do
 
         , match $ \(req :: AppendEntriesReq) -> do
             let term = areqTerm req
-            whenUpdatedTerm mx term $
-              syncWithTerm mx term >> appendEntries mx req
+            whenUpdatedTerm mx term $ do
+              syncWithTerm mx term
+              success <- appendEntries mx req
+              saveSession mx
+              stTerm <- currTerm <$> readMVar mx
+              nsendRemote (leaderId req) raftServerName
+                AppendEntriesRes { aresTerm    = stTerm
+                                 , aresSuccess = success
+                                 }
 
         , match $ \(req :: RequestVoteReq) -> do
             let term = vreqTerm req
             whenUpdatedTerm mx term $ do
               syncWithTerm mx term
-
-              response <- responseVote req <$> readMVar mx
-              let candId = vreqCandidateId req
-              nsendRemote candId raftServerName response
-              if voteGranted response
-                then modifyMVar_ mx $ \st -> return st { votedFor = Just candId }
-                else respondToServers
+              success <- voteForCandidate mx req
+              saveSession mx
+              stTerm <- currTerm <$> readMVar mx
+              nsendRemote (vreqCandidateId req) raftServerName
+                RequestVoteRes { vresTerm    = stTerm
+                               , voteGranted = success
+                               }
+              unless success respondToServers
         ]
 
-appendEntries :: MVar ServerState -> AppendEntriesReq -> Process ()
+appendEntries :: MVar ServerState -> AppendEntriesReq -> Process Bool
 appendEntries mx req = do
   st <- readMVar mx
-  let idx        = prevLogIndex req
-      oldLog     = U.dropWhile ((> idx) . logIndex) . getLog $ currVec st
-      lastEntry  = U.head oldLog
-      entries    = getLog $ areqEntries req
-      result res = AppendEntriesRes { aresTerm    = currTerm st
-                                    , aresSuccess = res
-                                    }
+  let idx       = prevLogIndex req
+      oldLog    = U.dropWhile ((> idx) . logIndex) . getLog $ currVec st
+      lastEntry = U.head oldLog
+      entries   = getLog $ areqEntries req
   case () of
     _ | idx == 0
-        -> do reply $ result True
-              modifyMVar_ mx $ return . updCommits . setLog entries
+        -> do modifyMVar_ mx $ return . updCommits . setLog entries
+              return True
     _ | not (U.null oldLog)
       , logIndex lastEntry == idx
         -> if logTerm lastEntry == prevLogTerm req
-           then do reply $ result True
-                   modifyMVar_ mx
+           then do modifyMVar_ mx
                      $ return . updCommits . setLog (entries U.++ oldLog)
-           else do reply $ result False
-                   modifyMVar_ mx
+                   return True
+           else do modifyMVar_ mx
                      $ \s -> return s { currVec = LogVector (U.tail oldLog) }
-    _   -> reply $ result False
+                   return False
+    _   -> return False
   where
-    reply = nsendRemote (leaderId req) raftServerName
-
     setLog entries st = st { currVec = LogVector entries }
 
     updCommits st = st { commitIndex = n }
@@ -85,10 +89,13 @@ appendEntries mx req = do
                  then 0
                  else min (leaderCommit req) (logIndex $ U.head es)
 
-responseVote :: RequestVoteReq -> ServerState -> RequestVoteRes
-responseVote req st = RequestVoteRes { vresTerm    = currTerm st
-                                     , voteGranted = granted
-                                     }
-  where granted = case votedFor st of
-                    Nothing     -> True
-                    Just candId -> candId == vreqCandidateId req
+voteForCandidate :: MVar ServerState -> RequestVoteReq -> Process Bool
+voteForCandidate mx req = do
+  voted <- votedFor <$> readMVar mx
+  let candId  = vreqCandidateId req
+      granted = case voted of
+                  Nothing -> True
+                  Just c  -> c == candId
+  when granted . modifyMVar_ mx
+    $ \st -> return st { votedFor = Just candId }
+  return granted

@@ -14,7 +14,8 @@ import           Control.Distributed.Process      (NodeId (..), liftIO,
 import           Control.Distributed.Process.Node (closeLocalNode,
                                                    initRemoteTable,
                                                    newLocalNode, runProcess)
-import           Control.Monad                    (forM_, forever, void, when)
+import           Control.Exception                (catch, throwIO)
+import           Control.Monad                    (forM_, forever, void)
 import           Control.Monad.Trans.State        (StateT, evalStateT, get, put)
 import qualified Data.ByteString.Char8            as BC
 import           Data.List                        (delete)
@@ -25,10 +26,10 @@ import           Network.Transport                (EndPointAddress (..),
 import           Network.Transport.TCP            (createTransport,
                                                    defaultTCPParameters)
 import           Options.Applicative              (execParser)
-import           System.Directory                 (doesFileExist,
-                                                   getTemporaryDirectory,
+import           System.Directory                 (getTemporaryDirectory,
                                                    removeFile)
 import           System.FilePath.Posix            ((</>))
+import           System.IO.Error                  (isDoesNotExistError)
 import           System.Random                    (randomRIO)
 import           System.Random.Shuffle            (shuffleM)
 
@@ -160,5 +161,7 @@ tempSessionFile ept = do
   return $ dir </> getHost ept ++ ":" ++ getPort ept ++ ".tmp"
 
 rmSessionFile :: FilePath -> IO ()
-rmSessionFile file = do flag <- doesFileExist file
-                        when flag $ removeFile file
+rmSessionFile file = removeFile file `catch` fileHandler
+  where fileHandler e
+          | isDoesNotExistError e = return ()
+          | otherwise             = throwIO e

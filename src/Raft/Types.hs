@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveAnyClass        #-}
 {-# LANGUAGE DeriveGeneric         #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TemplateHaskell       #-}
@@ -28,15 +29,17 @@ import           Control.Concurrent.Chan      (Chan)
 import           Control.Concurrent.STM.TMVar (TMVar)
 import           Control.Distributed.Process  (NodeId)
 import           Data.Binary                  (Binary)
+import           Data.Serialize               (Serialize)
 import           Data.Typeable                (Typeable)
 import           Data.Vector.Binary           ()
+import           Data.Vector.Serialize        ()
 import qualified Data.Vector.Unboxed          as U
 import           Data.Vector.Unboxed.Deriving (derivingUnbox)
 import           Data.Word                    (Word32)
 import           GHC.Generics                 (Generic)
 
 newtype Xorshift32 = Xorshift32 { getWord32 :: Word32 }
-                   deriving (Show, Typeable, Generic)
+                   deriving (Show, Typeable, Generic, Serialize)
 instance Binary Xorshift32
 
 derivingUnbox "Xorshift32"
@@ -50,7 +53,7 @@ data LogEntry = LogEntry { logSeed  :: Xorshift32
                          , logTerm  :: Term
                          , logIndex :: Int
                          }
-              deriving (Show, Typeable, Generic)
+              deriving (Show, Typeable, Generic, Serialize)
 instance Binary LogEntry
 
 derivingUnbox "LogEntry"
@@ -59,7 +62,7 @@ derivingUnbox "LogEntry"
   [| \(seed, term, idx) -> LogEntry seed term idx |]
 
 newtype LogVector = LogVector { getLog :: U.Vector LogEntry }
-                  deriving (Show, Typeable, Generic)
+                  deriving (Show, Typeable, Generic, Serialize)
 instance Binary LogVector
 
 data RaftParams = RaftParams { raftPeers   :: [NodeId]
