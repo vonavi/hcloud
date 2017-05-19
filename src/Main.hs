@@ -152,7 +152,7 @@ randomSplit n = fmap (splitAt n) . shuffleM
 
 mkNodeId :: NodeEndPoint -> NodeId
 mkNodeId (NodeEndPoint host port) = NodeId . EndPointAddress . BC.concat
-                                    . map BC.pack $ [host, ":", port, ":0"]
+                                    . map BC.pack $ [host, ":", port]
 
 tempSessionFile :: NodeEndPoint -> IO FilePath
 tempSessionFile ept = do

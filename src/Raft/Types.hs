@@ -28,7 +28,7 @@ module Raft.Types
 
 import           Control.Concurrent.Chan      (Chan)
 import           Control.Concurrent.STM.TMVar (TMVar)
-import           Control.Distributed.Process  (NodeId, ProcessId)
+import           Control.Distributed.Process  (NodeId)
 import           Data.Binary                  (Binary)
 import           Data.Serialize               (Serialize)
 import           Data.Time.Clock              (UTCTime)
@@ -67,7 +67,7 @@ newtype LogVector = LogVector { getLog :: U.Vector LogEntry }
                   deriving (Show, Typeable, Generic, Serialize)
 instance Binary LogVector
 
-type LogMessage = (UTCTime, ProcessId, String)
+type LogMessage = (UTCTime, NodeId, String)
 
 data RaftParams = RaftParams { raftPeers   :: [NodeId]
                              , raftSeed    :: Word32

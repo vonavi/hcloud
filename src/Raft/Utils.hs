@@ -25,6 +25,7 @@ import           Control.Concurrent.Chan                      (Chan, newChan,
 import           Control.Concurrent.Lifted                    (threadDelay)
 import           Control.Concurrent.MVar.Lifted               (MVar, modifyMVar,
                                                                modifyMVar_,
+                                                               newMVar,
                                                                readMVar)
 import           Control.Concurrent.STM                       (atomically,
                                                                check)
@@ -34,6 +35,7 @@ import           Control.Concurrent.STM.TMVar                 (isEmptyTMVar,
 import           Control.Distributed.Process                  (NodeId (..),
                                                                Process,
                                                                ProcessId,
+                                                               getSelfNode,
                                                                getSelfPid,
                                                                liftIO, send,
                                                                spawnLocal)
@@ -109,39 +111,43 @@ newLogger :: IO (Chan LogMessage)
 newLogger = do
   logs <- newChan
   void . forkIO . forever $ do
-    (now, pid, str) <- readChan logs
+    (now, nid, str) <- readChan logs
     let timeStr = formatTime defaultTimeLocale "%c" now
-    hPutStrLn stderr $ timeStr ++ " " ++ show pid ++ ": " ++ str
+    hPutStrLn stderr $ timeStr ++ " " ++ show nid ++ ": " ++ str
     hFlush stderr
   return logs
 
 writeLogger :: Chan LogMessage -> String -> Process ()
 writeLogger logs str = do
   now <- liftIO getCurrentTime
-  pid <- getSelfPid
-  liftIO $ writeChan logs (now, pid, str)
+  nid <- getSelfNode
+  liftIO $ writeChan logs (now, nid, str)
 
 newMailbox :: IO Mailbox
 newMailbox = do
-  start <- atomically newEmptyTMVar
-  box   <- newChan
+  start  <- atomically newEmptyTMVar
+  box    <- newChan
+  mNodes <- newMVar []
   void . forkIO . forever $ do
-    (now, pid, str) <- readChan box
-    let timeStr = formatTime defaultTimeLocale "%c" now
-    putStrLn $ timeStr ++ " " ++ show pid ++ ": " ++ str
-    hFlush stdout
+    (now, nid, str) <- readChan box
+    nidList         <- readMVar mNodes
+    when (nid `notElem` nidList) $ do
+      let timeStr = formatTime defaultTimeLocale "%c" now
+      putStrLn $ timeStr ++ " " ++ show nid ++ ": " ++ str
+      hFlush stdout
+    modifyMVar_ mNodes $ return . (nid :)
   return Mailbox { putMsg = start
                  , msgBox = box
                  }
 
 registerMailbox :: MVar ServerState -> Mailbox -> Process ()
 registerMailbox mx mailbox = do
-  pid <- getSelfPid
+  nid <- getSelfNode
   void . spawnLocal . liftIO $ do
     atomically $ isEmptyTMVar (putMsg mailbox) >>= check . not
     str <- show . currVec <$> readMVar mx
     now <- getCurrentTime
-    writeChan (msgBox mailbox) (now, pid, str)
+    writeChan (msgBox mailbox) (now, nid, str)
 
 putMessages :: Mailbox -> IO ()
 putMessages mailbox = atomically $ putTMVar (putMsg mailbox) ()
