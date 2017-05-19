@@ -35,8 +35,7 @@ import           System.Random.Shuffle            (shuffleM)
 
 import           Parameters                       (getParameters)
 import           Raft                             (initRaft)
-import           Raft.Types                       (Mailbox (..),
-                                                   RaftParams (..))
+import           Raft.Types
 import           Raft.Utils                       (newLogger, newMailbox,
                                                    putMessages, writeLogger)
 import           Types
@@ -94,13 +93,13 @@ startServer params ept = do
     void . spawnLocal $ initRaft params
   return (tr, node)
 
-stopServer :: Chan String -> Connection -> IO ()
+stopServer :: Chan LogMessage -> Connection -> IO ()
 stopServer logs (tr, node) = do
   runProcess node $ writeLogger logs "stopping server..."
   closeTransport tr
   closeLocalNode node
 
-runTest :: Word32 -> Chan String -> Mailbox -> StateT NodeConfig IO ()
+runTest :: Word32 -> Chan LogMessage -> Mailbox -> StateT NodeConfig IO ()
 runTest seed logs mailbox = forever $ do
   nodeCfg <- get
   -- The majority of nodes should be always connected

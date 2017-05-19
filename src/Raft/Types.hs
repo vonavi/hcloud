@@ -11,6 +11,7 @@ module Raft.Types
   , LogEntry(..)
   , LogVector(..)
   , RaftParams(..)
+  , LogMessage
   , Mailbox(..)
   , LeaderId
   , Role(..)
@@ -27,9 +28,10 @@ module Raft.Types
 
 import           Control.Concurrent.Chan      (Chan)
 import           Control.Concurrent.STM.TMVar (TMVar)
-import           Control.Distributed.Process  (NodeId)
+import           Control.Distributed.Process  (NodeId, ProcessId)
 import           Data.Binary                  (Binary)
 import           Data.Serialize               (Serialize)
+import           Data.Time.Clock              (UTCTime)
 import           Data.Typeable                (Typeable)
 import           Data.Vector.Binary           ()
 import           Data.Vector.Serialize        ()
@@ -65,15 +67,17 @@ newtype LogVector = LogVector { getLog :: U.Vector LogEntry }
                   deriving (Show, Typeable, Generic, Serialize)
 instance Binary LogVector
 
+type LogMessage = (UTCTime, ProcessId, String)
+
 data RaftParams = RaftParams { raftPeers   :: [NodeId]
                              , raftSeed    :: Word32
                              , raftFile    :: FilePath
-                             , raftLogger  :: Chan String
+                             , raftLogger  :: Chan LogMessage
                              , raftMailbox :: Mailbox
                              }
 
 data Mailbox = Mailbox { putMsg :: TMVar ()
-                       , msgBox :: Chan LogVector
+                       , msgBox :: Chan LogMessage
                        }
 
 type LeaderId = NodeId
@@ -89,7 +93,7 @@ data ServerState = ServerState { currTerm    :: Term
                                , matchIndex  :: [(NodeId, Int)]
                                , initSeed    :: Xorshift32
                                , sessionFile :: FilePath
-                               , selfLogger  :: Chan String
+                               , selfLogger  :: Chan LogMessage
                                }
 
 data RequestVoteReq = RequestVoteReq

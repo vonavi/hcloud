@@ -105,34 +105,43 @@ nextRandomNum (Xorshift32 a) = Xorshift32 d
         c = b `xor` shiftR b 17
         d = c `xor` shiftL c 5
 
-newLogger :: IO (Chan String)
+newLogger :: IO (Chan LogMessage)
 newLogger = do
   logs <- newChan
-  void . forkIO . forever
-    $ readChan logs >>= hPutStrLn stderr >> hFlush stderr
+  void . forkIO . forever $ do
+    (now, pid, str) <- readChan logs
+    let timeStr = formatTime defaultTimeLocale "%c" now
+    hPutStrLn stderr $ timeStr ++ " " ++ show pid ++ ": " ++ str
+    hFlush stderr
   return logs
 
-writeLogger :: Chan String -> String -> Process ()
+writeLogger :: Chan LogMessage -> String -> Process ()
 writeLogger logs str = do
   now <- liftIO getCurrentTime
   pid <- getSelfPid
-  liftIO . writeChan logs
-    $ formatTime defaultTimeLocale "%c" now ++ " " ++ show pid ++ ": " ++ str
+  liftIO $ writeChan logs (now, pid, str)
 
 newMailbox :: IO Mailbox
 newMailbox = do
-  now <- atomically newEmptyTMVar
-  box <- newChan
-  void . forkIO . forever $ readChan box >>= print >> hFlush stdout
-  return Mailbox { putMsg = now
+  start <- atomically newEmptyTMVar
+  box   <- newChan
+  void . forkIO . forever $ do
+    (now, pid, str) <- readChan box
+    let timeStr = formatTime defaultTimeLocale "%c" now
+    putStrLn $ timeStr ++ " " ++ show pid ++ ": " ++ str
+    hFlush stdout
+  return Mailbox { putMsg = start
                  , msgBox = box
                  }
 
 registerMailbox :: MVar ServerState -> Mailbox -> Process ()
-registerMailbox mx mailbox = void . spawnLocal . liftIO $ do
-  atomically $ isEmptyTMVar (putMsg mailbox) >>= check . not
-  entries <- currVec <$> readMVar mx
-  writeChan (msgBox mailbox) entries
+registerMailbox mx mailbox = do
+  pid <- getSelfPid
+  void . spawnLocal . liftIO $ do
+    atomically $ isEmptyTMVar (putMsg mailbox) >>= check . not
+    str <- show . currVec <$> readMVar mx
+    now <- getCurrentTime
+    writeChan (msgBox mailbox) (now, pid, str)
 
 putMessages :: Mailbox -> IO ()
 putMessages mailbox = atomically $ putTMVar (putMsg mailbox) ()
