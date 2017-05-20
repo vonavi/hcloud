@@ -19,7 +19,7 @@ import           Raft.Utils                     (randomElectionTimeout,
 follower :: MVar ServerState -> Process ()
 follower mx = do
   eTime    <- randomElectionTimeout $ electionTimeoutMs * 1000
-  reminder <- remindTimeout eTime
+  reminder <- remindTimeout eTime ElectionTimeout
 
   -- Communicate if the election timer is not elapsed
   respondToServers

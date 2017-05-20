@@ -23,6 +23,7 @@ module Raft.Types
   , RemindTimeout(..)
   , raftServerName
   , electionTimeoutMs
+  , heartbeatTimeoutMs
   , sendIntervalMs
   ) where
 
@@ -30,6 +31,7 @@ import           Control.Concurrent.Chan      (Chan)
 import           Control.Concurrent.STM.TMVar (TMVar)
 import           Control.Distributed.Process  (NodeId)
 import           Data.Binary                  (Binary)
+import qualified Data.Map.Strict              as M
 import           Data.Serialize               (Serialize)
 import           Data.Time.Clock              (UTCTime)
 import           Data.Typeable                (Typeable)
@@ -83,18 +85,19 @@ data Mailbox = Mailbox { putMsg :: TMVar ()
 type LeaderId = NodeId
 data Role     = Follower | Candidate | Leader
 
-data ServerState = ServerState { currTerm    :: Term
-                               , votedFor    :: Maybe LeaderId
-                               , currRole    :: Role
-                               , currVec     :: LogVector
-                               , commitIndex :: Int
-                               , lastApplied :: Int
-                               , nextIndex   :: [(NodeId, Int)]
-                               , matchIndex  :: [(NodeId, Int)]
-                               , initSeed    :: Xorshift32
-                               , sessionFile :: FilePath
-                               , selfLogger  :: Chan LogMessage
-                               }
+data ServerState = ServerState
+                   { currTerm    :: Term
+                   , votedFor    :: Maybe LeaderId
+                   , currRole    :: Role
+                   , currVec     :: LogVector
+                   , commitIndex :: Int
+                   , lastApplied :: Int
+                   , nextIndex   :: M.Map NodeId Int
+                   , matchIndex  :: [(NodeId, Int)]
+                   , initSeed    :: Xorshift32
+                   , sessionFile :: FilePath
+                   , selfLogger  :: Chan LogMessage
+                   }
 
 data RequestVoteReq = RequestVoteReq
                       { vreqTerm        :: Term
@@ -129,7 +132,10 @@ data AppendEntriesRes = AppendEntriesRes
                       deriving (Typeable, Generic)
 instance Binary AppendEntriesRes
 
-data RemindTimeout = RemindTimeout deriving (Typeable, Generic)
+data RemindTimeout = HeartbeatTimeout
+                   | SendIntervalTimeout
+                   | ElectionTimeout
+                   deriving (Typeable, Generic)
 instance Binary RemindTimeout
 
 raftServerName :: String
@@ -139,6 +145,10 @@ raftServerName = "raft"
 electionTimeoutMs :: Int
 electionTimeoutMs = 150
 
--- | Time interval between consecutive messages
+-- | Heartbeat timeout in milliseconds
+heartbeatTimeoutMs :: Int
+heartbeatTimeoutMs = 1
+
+-- | Time interval between consecutive messages, in milliseconds
 sendIntervalMs :: Int
 sendIntervalMs = 1

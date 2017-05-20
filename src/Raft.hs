@@ -8,6 +8,7 @@ module Raft
 import           Control.Concurrent.MVar.Lifted (newMVar, readMVar)
 import           Control.Distributed.Process    (Process, getSelfPid, register)
 import           Control.Monad                  (forever)
+import qualified Data.Map.Strict                as M
 
 import           Raft.Candidate                 (candidate)
 import           Raft.Follower                  (follower)
@@ -26,7 +27,7 @@ initRaft params = do
                             , currVec     = logs
                             , commitIndex = 0
                             , lastApplied = 0
-                            , nextIndex   = []
+                            , nextIndex   = M.empty
                             , matchIndex  = zip peers $ repeat 0
                             , initSeed    = Xorshift32 $ raftSeed params
                             , sessionFile = raftFile params

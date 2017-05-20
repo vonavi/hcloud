@@ -20,7 +20,7 @@ candidate :: MVar ServerState -> [NodeId] -> Process ()
 candidate mx peers = do
   term     <- incCurrentTerm mx
   eTime    <- randomElectionTimeout $ electionTimeoutMs * 1000
-  reminder <- remindTimeout eTime
+  reminder <- remindTimeout eTime ElectionTimeout
 
   -- Send RequestVote RPCs to all other servers
   node <- getSelfNode

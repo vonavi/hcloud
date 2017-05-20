@@ -84,12 +84,12 @@ incCurrentTerm mx = modifyMVar mx $ return . updater
                              , votedFor = Nothing
                              }
 
-remindTimeout :: Int -> Process ProcessId
-remindTimeout micros = do
+remindTimeout :: Int -> RemindTimeout -> Process ProcessId
+remindTimeout micros timeout = do
   pid <- getSelfPid
   spawnLocal $ do
     threadDelay micros
-    send pid RemindTimeout
+    send pid timeout
 
 randomElectionTimeout :: Int -> Process Int
 randomElectionTimeout base =
