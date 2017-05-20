@@ -9,6 +9,7 @@ import           Control.Concurrent.MVar.Lifted (MVar, modifyMVar_, readMVar)
 import           Control.Distributed.Process    (NodeId, Process, exit,
                                                  getSelfNode, match,
                                                  nsendRemote, receiveWait)
+import           Control.Monad                  (void)
 import           Data.Foldable                  (forM_)
 
 import           Raft.Types
@@ -42,7 +43,7 @@ collectVotes mx n =
   , match $ \(res :: RequestVoteRes) -> do
       term <- currTerm <$> readMVar mx
       case () of
-        _ | vresTerm res > term  -> syncWithTerm mx (vresTerm res)
+        _ | vresTerm res > term  -> void $ syncWithTerm mx (vresTerm res)
         _ | vresTerm res == term
           , voteGranted res      -> collectVotes mx (pred n)
         _                        -> collectVotes mx n

@@ -6,15 +6,17 @@ module Raft.Follower
   ) where
 
 import           Control.Concurrent.MVar.Lifted (MVar, modifyMVar_, readMVar)
-import           Control.Distributed.Process    (Process, exit, match,
-                                                 nsendRemote, receiveWait)
-import           Control.Monad                  (unless, when)
+import           Control.Distributed.Process    (Process, exit, getSelfNode,
+                                                 match, nsendRemote,
+                                                 receiveWait)
+import           Control.Monad                  (unless, void, when)
 import qualified Data.Vector.Unboxed            as U
 
 import           Raft.Types
-import           Raft.Utils                     (randomElectionTimeout,
+import           Raft.Utils                     (getMatchIndex, isTermStale,
+                                                 randomElectionTimeout,
                                                  remindTimeout, saveSession,
-                                                 syncWithTerm, whenUpdatedTerm)
+                                                 syncWithTerm)
 
 follower :: MVar ServerState -> Process ()
 follower mx = do
@@ -35,20 +37,25 @@ follower mx = do
 
         , match $ \(req :: AppendEntriesReq) -> do
             let term = areqTerm req
-            whenUpdatedTerm mx term $ do
-              syncWithTerm mx term
+            ignore <- isTermStale mx term
+            unless ignore $ do
+              void $ syncWithTerm mx term
               success <- appendEntries mx req
               saveSession mx
-              stTerm <- currTerm <$> readMVar mx
+              st   <- readMVar mx
+              node <- getSelfNode
               nsendRemote (leaderId req) raftServerName
-                AppendEntriesRes { aresTerm    = stTerm
-                                 , aresSuccess = success
+                AppendEntriesRes { aresTerm       = currTerm st
+                                 , aresSuccess    = success
+                                 , aresFollowerId = node
+                                 , aresMatchIndex = getMatchIndex $ currVec st
                                  }
 
         , match $ \(req :: RequestVoteReq) -> do
             let term = vreqTerm req
-            whenUpdatedTerm mx term $ do
-              syncWithTerm mx term
+            ignore <- isTermStale mx term
+            unless ignore $ do
+              void $ syncWithTerm mx term
               success <- voteForCandidate mx req
               saveSession mx
               stTerm <- currTerm <$> readMVar mx

@@ -93,7 +93,7 @@ data ServerState = ServerState
                    , commitIndex :: Int
                    , lastApplied :: Int
                    , nextIndex   :: M.Map NodeId Int
-                   , matchIndex  :: [(NodeId, Int)]
+                   , matchIndex  :: M.Map NodeId Int
                    , initSeed    :: Xorshift32
                    , sessionFile :: FilePath
                    , selfLogger  :: Chan LogMessage
@@ -126,8 +126,10 @@ data AppendEntriesReq = AppendEntriesReq
 instance Binary AppendEntriesReq
 
 data AppendEntriesRes = AppendEntriesRes
-                        { aresTerm    :: Term
-                        , aresSuccess :: Bool
+                        { aresTerm       :: Term
+                        , aresSuccess    :: Bool
+                        , aresFollowerId :: NodeId
+                        , aresMatchIndex :: Int
                         }
                       deriving (Typeable, Generic)
 instance Binary AppendEntriesRes

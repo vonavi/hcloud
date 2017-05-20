@@ -11,13 +11,18 @@ import           Control.Distributed.Process    (NodeId, Process, ProcessId,
                                                  exit, getSelfNode, getSelfPid,
                                                  match, nsendRemote,
                                                  receiveWait, send, spawnLocal)
-import           Control.Monad                  (forM_, forever, void)
+import           Control.Monad                  (forM_, forever, unless, void,
+                                                 when)
+import           Data.List                      (sortBy)
 import qualified Data.Map.Strict                as M
+import           Data.Maybe                     (fromJust)
+import           Data.Ord                       (Down (..), comparing)
 import qualified Data.Vector.Unboxed            as U
 
 import           Raft.Types
-import           Raft.Utils                     (getNextIndex, nextRandomNum,
-                                                 remindTimeout, syncWithTerm)
+import           Raft.Utils                     (getNextIndex, isTermStale,
+                                                 nextRandomNum, remindTimeout,
+                                                 syncWithTerm)
 
 leader :: MVar ServerState -> [NodeId] -> Process ()
 leader mx peers = do
@@ -78,20 +83,68 @@ startCommunications mx peers heartbeat =
             >>= startCommunications mx peers
 
         _                   -> startCommunications mx peers heartbeat
-  ]
 
-collectCommits :: MVar ServerState -> Int -> Process ()
-collectCommits _  0 = return ()
-collectCommits mx n =
-  receiveWait
-  [ match $ \(res :: AppendEntriesRes) -> do
-      term <- currTerm <$> readMVar mx
-      case () of
-        _ | aresTerm res > term  -> syncWithTerm mx (aresTerm res)
-        _ | aresTerm res == term
-          , aresSuccess res      -> collectCommits mx (pred n)
-        _                        -> collectCommits mx n
-    ]
+  , match $ \(res :: AppendEntriesRes) -> do
+      let term = aresTerm res
+      unlessStepDown term . unlessStaleTerm term $ do
+        success <- collectAppendEntriesRes mx res
+        unless success $ do
+          let peer = aresFollowerId res
+          decrementNextIndex mx peer
+          void . spawnLocal $ sendAppendEntries mx peer
+        startCommunications mx peers heartbeat
+
+  , match $ \(req :: AppendEntriesReq) ->
+      unlessStepDown (areqTerm req) $ startCommunications mx peers heartbeat
+
+  , match $ \(res :: RequestVoteRes) ->
+      unlessStepDown (vresTerm res) $ startCommunications mx peers heartbeat
+
+  , match $ \(req :: RequestVoteReq) ->
+      unlessStepDown (vreqTerm req) $ startCommunications mx peers heartbeat
+  ]
+  where unlessStepDown :: Term -> Process ProcessId -> Process ProcessId
+        unlessStepDown term act = do
+          stepDown <- syncWithTerm mx term
+          if stepDown then return heartbeat else act
+
+        unlessStaleTerm :: Term -> Process ProcessId -> Process ProcessId
+        unlessStaleTerm term act = do
+          ignore <- isTermStale mx term
+          if ignore
+            then startCommunications mx peers heartbeat
+            else act
+
+collectAppendEntriesRes :: MVar ServerState -> AppendEntriesRes -> Process Bool
+collectAppendEntriesRes mx res
+  | not (aresSuccess res) = return False
+  | otherwise             = do
+      let peer     = aresFollowerId res
+          matchIdx = aresMatchIndex res
+      modifyMVar_ mx
+        $ \st -> return st { matchIndex = M.adjust (const matchIdx) peer
+                                          $ matchIndex st
+                           , nextIndex  = M.adjust (succ . const matchIdx) peer
+                                          $ nextIndex st
+                           }
+      updateCommitIndex mx
+      return True
+
+updateCommitIndex :: MVar ServerState -> Process ()
+updateCommitIndex mx = do
+  st <- readMVar mx
+  -- Find the index 'n' of log entry replicated on a majority of the servers
+  let idxList = sortBy (comparing Down) . map snd . M.toList $ matchIndex st
+      n       = idxList !! ((length idxList - 1) `div` 2)
+      term    = logTerm . fromJust . U.find ((== n) . logIndex)
+                . getLog $ currVec st
+  when ((n > commitIndex st) && (term == currTerm st))
+    $ modifyMVar_ mx $ \s -> return s { commitIndex = n }
+
+decrementNextIndex :: MVar ServerState -> NodeId -> Process ()
+decrementNextIndex mx peer =
+  modifyMVar_ mx
+  $ \st -> return st { nextIndex = M.adjust pred peer $ nextIndex st }
 
 newClientEntry :: ServerState -> ServerState
 newClientEntry st = st { currVec = LogVector $ U.cons entry oldLog }

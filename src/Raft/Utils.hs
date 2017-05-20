@@ -2,11 +2,12 @@
 
 module Raft.Utils
   (
-    whenUpdatedTerm
+    isTermStale
   , syncWithTerm
   , incCurrentTerm
   , remindTimeout
   , randomElectionTimeout
+  , getMatchIndex
   , getNextIndex
   , nextRandomNum
   , newLogger
@@ -61,20 +62,21 @@ import           System.Random                                (randomRIO)
 
 import           Raft.Types
 
-whenUpdatedTerm :: MonadBaseControl IO m
-                => MVar ServerState -> Term -> m () -> m ()
-whenUpdatedTerm mx term act = do
+isTermStale :: MonadBaseControl IO m => MVar ServerState -> Term -> m Bool
+isTermStale mx term = do
   stTerm <- currTerm <$> readMVar mx
-  when (term >= stTerm) act
+  return (term < stTerm)
 
-syncWithTerm :: MonadBaseControl IO m => MVar ServerState -> Term -> m ()
-syncWithTerm mx term = modifyMVar_ mx $ return . updater
-  where updater st = if term > currTerm st
-                     then st { currTerm = term
-                             , votedFor = Nothing
-                             , currRole = Follower
-                             }
-                     else st
+syncWithTerm :: MonadBaseControl IO m => MVar ServerState -> Term -> m Bool
+syncWithTerm mx term = do
+  stTerm <- currTerm <$> readMVar mx
+  if term > stTerm
+    then do modifyMVar_ mx $ \st -> return st { currTerm = term
+                                              , votedFor = Nothing
+                                              , currRole = Follower
+                                              }
+            return True
+    else return False
 
 incCurrentTerm :: MonadBaseControl IO m => MVar ServerState -> m Term
 incCurrentTerm mx = modifyMVar mx $ return . updater
@@ -95,10 +97,13 @@ randomElectionTimeout :: Int -> Process Int
 randomElectionTimeout base =
   liftIO $ ((base `div` 1000) *) <$> randomRIO (1000, 2000)
 
-getNextIndex :: LogVector -> Int
-getNextIndex v | U.null logs = 1
-               | otherwise   = succ . logIndex $ U.head logs
+getMatchIndex :: LogVector -> Int
+getMatchIndex v | U.null logs = 0
+                | otherwise   = logIndex $ U.head logs
   where logs = getLog v
+
+getNextIndex :: LogVector -> Int
+getNextIndex = succ . getMatchIndex
 
 -- Iterates the random generator for 32 bits
 nextRandomNum :: Xorshift32 -> Xorshift32
