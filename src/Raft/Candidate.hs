@@ -5,15 +5,15 @@ module Raft.Candidate
     candidate
   ) where
 
-import           Control.Concurrent.MVar.Lifted (MVar, modifyMVar_, readMVar)
+import           Control.Concurrent.MVar.Lifted (MVar, modifyMVar_)
 import           Control.Distributed.Process    (NodeId, Process, exit,
                                                  getSelfNode, match,
                                                  nsendRemote, receiveWait)
-import           Control.Monad                  (void)
+import           Control.Monad                  (unless)
 import           Data.Foldable                  (forM_)
 
 import           Raft.Types
-import           Raft.Utils                     (incCurrentTerm,
+import           Raft.Utils                     (incCurrentTerm, isTermStale,
                                                  randomElectionTimeout,
                                                  remindTimeout, syncWithTerm)
 
@@ -38,13 +38,35 @@ collectVotes mx 0 = modifyMVar_ mx $ \st -> return st { currRole = Leader }
 collectVotes mx n =
   receiveWait
   [ -- If election timeout elapses: start new election
-    match $ \(_ :: RemindTimeout) -> return ()
+    match $ \(timeout :: RemindTimeout) ->
+      case timeout of
+        ElectionTimeout -> return ()
+        _               -> collectVotes mx n
 
   , match $ \(res :: RequestVoteRes) -> do
-      term <- currTerm <$> readMVar mx
-      case () of
-        _ | vresTerm res > term  -> void $ syncWithTerm mx (vresTerm res)
-        _ | vresTerm res == term
-          , voteGranted res      -> collectVotes mx (pred n)
-        _                        -> collectVotes mx n
+      let term = vresTerm res
+      unlessStepDown term . unlessStaleTerm term
+        $ if voteGranted res
+          then collectVotes mx (pred n)
+          else collectVotes mx n
+
+  , match $ \(req :: AppendEntriesReq) -> do
+      let term = areqTerm req
+      unlessStepDown term . unlessStaleTerm term
+        . modifyMVar_ mx $ \st -> return st { currRole = Follower }
+
+  , match $ \(req :: RequestVoteReq) ->
+      unlessStepDown (vreqTerm req) $ collectVotes mx n
+
+  , match $ \(res :: AppendEntriesRes) ->
+      unlessStepDown (aresTerm res) $ collectVotes mx n
   ]
+  where unlessStepDown :: Term -> Process () -> Process ()
+        unlessStepDown term act = do
+          stepDown <- syncWithTerm mx term
+          unless stepDown act
+
+        unlessStaleTerm :: Term -> Process () -> Process ()
+        unlessStaleTerm term act = do
+          ignore <- isTermStale mx term
+          if ignore then collectVotes mx n else act
