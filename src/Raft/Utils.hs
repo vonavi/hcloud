@@ -24,7 +24,7 @@ import           Control.Concurrent.Chan                      (Chan, newChan,
                                                                readChan,
                                                                writeChan)
 import           Control.Concurrent.Lifted                    (threadDelay)
-import           Control.Concurrent.MVar.Lifted               (MVar, modifyMVar,
+import           Control.Concurrent.MVar.Lifted               (MVar,
                                                                modifyMVar_,
                                                                newMVar,
                                                                readMVar)
@@ -78,13 +78,11 @@ syncWithTerm mx term = do
             return True
     else return False
 
-incCurrentTerm :: MonadBaseControl IO m => MVar ServerState -> m Term
-incCurrentTerm mx = modifyMVar mx $ return . updater
-  where updater st = (updSt, updTerm)
-          where updTerm = succ $ currTerm st
-                updSt   = st { currTerm = updTerm
-                             , votedFor = Nothing
-                             }
+incCurrentTerm :: MonadBaseControl IO m => MVar ServerState -> m ()
+incCurrentTerm mx = modifyMVar_ mx
+                    $ \st -> return st { currTerm = succ $ currTerm st
+                                       , votedFor = Nothing
+                                       }
 
 remindTimeout :: Int -> RemindTimeout -> Process ProcessId
 remindTimeout micros timeout = do

@@ -102,6 +102,8 @@ data ServerState = ServerState
 data RequestVoteReq = RequestVoteReq
                       { vreqTerm        :: Term
                       , vreqCandidateId :: LeaderId
+                      , lastLogIndex    :: Int
+                      , lastLogTerm     :: Term
                       }
                     deriving (Typeable, Generic)
 instance Binary RequestVoteReq

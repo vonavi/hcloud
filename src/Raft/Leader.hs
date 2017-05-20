@@ -94,14 +94,9 @@ startCommunications mx peers heartbeat =
           void . spawnLocal $ sendAppendEntries mx peer
         startCommunications mx peers heartbeat
 
-  , match $ \(req :: AppendEntriesReq) ->
-      unlessStepDown (areqTerm req) $ startCommunications mx peers heartbeat
-
-  , match $ \(res :: RequestVoteRes) ->
-      unlessStepDown (vresTerm res) $ startCommunications mx peers heartbeat
-
-  , match $ \(req :: RequestVoteReq) ->
-      unlessStepDown (vreqTerm req) $ startCommunications mx peers heartbeat
+  , match $ \(_ :: AppendEntriesReq) -> startCommunications mx peers heartbeat
+  , match $ \(_ :: RequestVoteRes) -> startCommunications mx peers heartbeat
+  , match $ \(_ :: RequestVoteReq) -> startCommunications mx peers heartbeat
   ]
   where unlessStepDown :: Term -> Process ProcessId -> Process ProcessId
         unlessStepDown term act = do

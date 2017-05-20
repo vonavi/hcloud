@@ -9,7 +9,8 @@ import           Control.Concurrent.MVar.Lifted (MVar, modifyMVar_, readMVar)
 import           Control.Distributed.Process    (Process, exit, getSelfNode,
                                                  match, nsendRemote,
                                                  receiveWait)
-import           Control.Monad                  (unless, void, when)
+import           Control.Monad                  (unless, void)
+import           Data.Monoid                    ((<>))
 import qualified Data.Vector.Unboxed            as U
 
 import           Raft.Types
@@ -24,47 +25,56 @@ follower mx = do
   reminder <- remindTimeout eTime ElectionTimeout
 
   -- Communicate if the election timer is not elapsed
-  respondToServers
+  respondToServers mx
   exit reminder ()
-    where
-      respondToServers =
-        receiveWait
-        [ -- If election timeout elapses without receiving
-          -- AppendEntries RPC form current leader or granting vote to
-          -- candidate: convert to candidate.
-          match $ \(_ :: RemindTimeout) ->
-            modifyMVar_ mx $ \st -> return st { currRole = Candidate }
 
-        , match $ \(req :: AppendEntriesReq) -> do
-            let term = areqTerm req
-            ignore <- isTermStale mx term
-            unless ignore $ do
-              void $ syncWithTerm mx term
-              success <- appendEntries mx req
-              saveSession mx
-              st   <- readMVar mx
-              node <- getSelfNode
-              nsendRemote (leaderId req) raftServerName
-                AppendEntriesRes { aresTerm       = currTerm st
-                                 , aresSuccess    = success
-                                 , aresFollowerId = node
-                                 , aresMatchIndex = getMatchIndex $ currVec st
-                                 }
+respondToServers :: MVar ServerState -> Process ()
+respondToServers mx =
+  receiveWait
+  [ -- If election timeout elapses without receiving AppendEntries RPC
+    -- form current leader or granting vote to candidate: convert to
+    -- candidate.
+    match $ \(timeout :: RemindTimeout) ->
+      case timeout of
+        ElectionTimeout -> modifyMVar_ mx
+                           $ \st -> return st { currRole = Candidate }
+        _               -> respondToServers mx
 
-        , match $ \(req :: RequestVoteReq) -> do
-            let term = vreqTerm req
-            ignore <- isTermStale mx term
-            unless ignore $ do
-              void $ syncWithTerm mx term
-              success <- voteForCandidate mx req
-              saveSession mx
-              stTerm <- currTerm <$> readMVar mx
-              nsendRemote (vreqCandidateId req) raftServerName
-                RequestVoteRes { vresTerm    = stTerm
-                               , voteGranted = success
-                               }
-              unless success respondToServers
-        ]
+  , match $ \(req :: AppendEntriesReq) -> do
+      let term = areqTerm req
+      void $ syncWithTerm mx term
+      unlessStaleTerm term $ do
+        success <- appendEntries mx req
+        saveSession mx
+        st   <- readMVar mx
+        node <- getSelfNode
+        nsendRemote (leaderId req) raftServerName
+          AppendEntriesRes { aresTerm       = currTerm st
+                           , aresSuccess    = success
+                           , aresFollowerId = node
+                           , aresMatchIndex = getMatchIndex $ currVec st
+                           }
+
+  , match $ \(req :: RequestVoteReq) -> do
+      let term = vreqTerm req
+      void $ syncWithTerm mx term
+      unlessStaleTerm term $ do
+        success <- voteForCandidate mx req
+        saveSession mx
+        stTerm <- currTerm <$> readMVar mx
+        nsendRemote (vreqCandidateId req) raftServerName
+          RequestVoteRes { vresTerm    = stTerm
+                         , voteGranted = success
+                         }
+        unless success $ respondToServers mx
+
+  , match $ \(_ :: AppendEntriesRes) -> respondToServers mx
+  , match $ \(_ :: RequestVoteRes) -> respondToServers mx
+  ]
+  where unlessStaleTerm :: Term -> Process () -> Process ()
+        unlessStaleTerm term act = do
+          ignore <- isTermStale mx term
+          if ignore then respondToServers mx else act
 
 appendEntries :: MVar ServerState -> AppendEntriesReq -> Process Bool
 appendEntries mx req = do
@@ -98,11 +108,19 @@ appendEntries mx req = do
 
 voteForCandidate :: MVar ServerState -> RequestVoteReq -> Process Bool
 voteForCandidate mx req = do
-  voted <- votedFor <$> readMVar mx
-  let candId  = vreqCandidateId req
-      granted = case voted of
-                  Nothing -> True
-                  Just c  -> c == candId
-  when granted . modifyMVar_ mx
-    $ \st -> return st { votedFor = Just candId }
-  return granted
+  st <- readMVar mx
+  let candId    = vreqCandidateId req
+      freeVote  = case votedFor st of
+                    Nothing -> True
+                    Just c  -> c == candId
+      stLog     = getLog $ currVec st
+      lastTerm  = if U.null stLog then 0 else logTerm (U.head stLog)
+      lastIndex = if U.null stLog then 0 else logIndex (U.head stLog)
+      cmpLogs   = compare (lastLogTerm req) lastTerm
+                  <> compare (lastLogIndex req) lastIndex
+  case () of
+    _ | not freeVote  -> return False
+    _ | LT <- cmpLogs -> return False
+    _                 -> do modifyMVar_ mx
+                              $ \s -> return s { votedFor = Just candId }
+                            return True

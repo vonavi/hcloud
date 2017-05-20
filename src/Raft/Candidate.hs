@@ -5,12 +5,13 @@ module Raft.Candidate
     candidate
   ) where
 
-import           Control.Concurrent.MVar.Lifted (MVar, modifyMVar_)
+import           Control.Concurrent.MVar.Lifted (MVar, modifyMVar_, readMVar)
 import           Control.Distributed.Process    (NodeId, Process, exit,
                                                  getSelfNode, match,
-                                                 nsendRemote, receiveWait)
-import           Control.Monad                  (unless)
-import           Data.Foldable                  (forM_)
+                                                 nsendRemote, receiveWait,
+                                                 spawnLocal)
+import           Control.Monad                  (forM_, unless, void)
+import qualified Data.Vector.Unboxed            as U
 
 import           Raft.Types
 import           Raft.Utils                     (incCurrentTerm, isTermStale,
@@ -19,19 +20,33 @@ import           Raft.Utils                     (incCurrentTerm, isTermStale,
 
 candidate :: MVar ServerState -> [NodeId] -> Process ()
 candidate mx peers = do
-  term     <- incCurrentTerm mx
+  incCurrentTerm mx
   eTime    <- randomElectionTimeout $ electionTimeoutMs * 1000
   reminder <- remindTimeout eTime ElectionTimeout
 
   -- Send RequestVote RPCs to all other servers
-  node <- getSelfNode
-  forM_ peers $ \p -> nsendRemote p raftServerName
-                      RequestVoteReq { vreqTerm        = term
-                                     , vreqCandidateId = node
-                                     }
+  void . spawnLocal . forM_ peers $ sendRequestVote mx
 
   collectVotes mx $ (length peers + 1) `div` 2
   exit reminder ()
+
+sendRequestVote :: MVar ServerState -> NodeId -> Process ()
+sendRequestVote mx peer = do
+  st   <- readMVar mx
+  node <- getSelfNode
+  let stLog = getLog $ currVec st
+  nsendRemote peer raftServerName
+    $ if U.null stLog
+      then RequestVoteReq { vreqTerm        = currTerm st
+                          , vreqCandidateId = node
+                          , lastLogIndex    = 0
+                          , lastLogTerm     = 0
+                          }
+      else RequestVoteReq { vreqTerm        = currTerm st
+                          , vreqCandidateId = node
+                          , lastLogIndex    = logIndex $ U.head stLog
+                          , lastLogTerm     = logTerm $ U.head stLog
+                          }
 
 collectVotes :: MVar ServerState -> Int -> Process ()
 collectVotes mx 0 = modifyMVar_ mx $ \st -> return st { currRole = Leader }
@@ -55,11 +70,8 @@ collectVotes mx n =
       unlessStepDown term . unlessStaleTerm term
         . modifyMVar_ mx $ \st -> return st { currRole = Follower }
 
-  , match $ \(req :: RequestVoteReq) ->
-      unlessStepDown (vreqTerm req) $ collectVotes mx n
-
-  , match $ \(res :: AppendEntriesRes) ->
-      unlessStepDown (aresTerm res) $ collectVotes mx n
+  , match $ \(_ :: RequestVoteReq) -> collectVotes mx n
+  , match $ \(_ :: AppendEntriesRes) -> collectVotes mx n
   ]
   where unlessStepDown :: Term -> Process () -> Process ()
         unlessStepDown term act = do
