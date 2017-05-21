@@ -53,11 +53,11 @@ import qualified Data.ByteString.Char8                        as BC
 import           Data.Serialize                               (decode, encode)
 import qualified Data.Vector.Unboxed                          as U
 import           Network.Transport                            (EndPointAddress (..))
-import           System.IO                                    (hFlush,
-                                                               hPutStrLn,
-                                                               stderr, stdout)
+import           System.IO                                    (hFlush, stderr,
+                                                               stdout)
 import           System.IO.Error                              (isDoesNotExistError)
 import           System.Random                                (randomRIO)
+import           Text.Printf                                  (hPrintf, printf)
 
 import           Raft.Types
 
@@ -124,8 +124,8 @@ newLogger = do
   logs <- newChan
   void . forkIO . forever $ do
     msg <- readChan logs
-    hPutStrLn stderr $ show (msgNodeId msg) ++ " Term " ++ show (msgTerm msg)
-      ++ " " ++ show (msgRole msg) ++ ": " ++ msgString msg
+    hPrintf stderr "%s Term %03d %-9s: %s\n" (show $ msgNodeId msg)
+      (msgTerm msg) (show $ msgRole msg) (msgString msg)
     hFlush stderr
   return logs
 
@@ -150,8 +150,8 @@ newMailbox = do
     nidList <- readMVar mNodes
     let nid = msgNodeId msg
     when (nid `notElem` nidList) $ do
-      putStrLn $ show nid ++ " Term " ++ show (msgTerm msg)
-        ++ " " ++ show (msgRole msg) ++ ": " ++ msgString msg
+      printf "%s Term %03d %-9s: %s\n" (show $ msgNodeId msg)
+        (msgTerm msg) (show $ msgRole msg) (msgString msg)
       hFlush stdout
     modifyMVar_ mNodes $ return . (nid :)
   return Mailbox { putMsg = start
