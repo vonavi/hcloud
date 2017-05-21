@@ -25,11 +25,13 @@ import           Raft.Utils                               (getLastIndex,
                                                            isTermStale,
                                                            randomElectionTimeout,
                                                            remindTimeout,
-                                                           syncWithTerm)
+                                                           syncWithTerm,
+                                                           writeLogger)
 
 candidate :: MVar ServerState -> [NodeId] -> Process ()
 candidate mx peers = do
   incCurrentTerm mx
+  writeLogger mx "Hi!"
   eTime    <- randomElectionTimeout $ electionTimeoutMs * 1000
   reminder <- remindTimeout eTime ElectionTimeout
 
@@ -41,6 +43,7 @@ candidate mx peers = do
 
 sendRequestVote :: MVar ServerState -> NodeId -> Process ()
 sendRequestVote mx peer = do
+  writeLogger mx $ "sending RequestVoteReq to " ++ show peer
   st   <- readMVar mx
   node <- getSelfNode
   let stLog = currVec st
@@ -56,17 +59,25 @@ collectVotes mx 0 = modifyMVar_ mx $ \st -> return st { currRole = Leader }
 collectVotes mx n =
   receiveWait
   [ match $ \(req :: AppendEntriesReq) -> do
+      writeLogger mx $ "received AppendEntriesReq from "
+        ++ show (leaderId req) ++ " Term " ++ show (areqTerm req)
       let term = areqTerm req
       unlessStepDown term req . unlessStaleTerm term
         . modifyMVar_ mx $ \st -> return st { currRole = Follower }
 
-  , match $ \(req :: RequestVoteReq) ->
+  , match $ \(req :: RequestVoteReq) -> do
+      writeLogger mx $ "received RequestVoteReq from "
+        ++ show (vreqCandidateId req) ++ " Term " ++ show (vreqTerm req)
       unlessStepDown (vreqTerm req) req $ collectVotes mx n
 
-  , match $ \(res :: AppendEntriesRes) ->
+  , match $ \(res :: AppendEntriesRes) -> do
+      writeLogger mx $ "received AppendEntriesRes from "
+        ++ show (aresFollowerId res) ++ " Term " ++ show (aresTerm res)
       unlessStepDown (aresTerm res) res $ collectVotes mx n
 
   , match $ \(res :: RequestVoteRes) -> do
+      writeLogger mx
+        $ "received RequestVoteRes from Term " ++ show (vresTerm res)
       let term = vresTerm res
       unlessStepDown term res . unlessStaleTerm term
         $ if voteGranted res

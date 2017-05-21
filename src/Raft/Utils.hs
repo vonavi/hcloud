@@ -51,9 +51,6 @@ import           Data.Bits                                    (shiftL, shiftR,
                                                                xor)
 import qualified Data.ByteString.Char8                        as BC
 import           Data.Serialize                               (decode, encode)
-import           Data.Time.Clock                              (getCurrentTime)
-import           Data.Time.Format                             (defaultTimeLocale,
-                                                               formatTime)
 import qualified Data.Vector.Unboxed                          as U
 import           Network.Transport                            (EndPointAddress (..))
 import           System.IO                                    (hFlush,
@@ -126,17 +123,22 @@ newLogger :: IO (Chan LogMessage)
 newLogger = do
   logs <- newChan
   void . forkIO . forever $ do
-    (now, nid, str) <- readChan logs
-    let timeStr = formatTime defaultTimeLocale "%c" now
-    hPutStrLn stderr $ timeStr ++ " " ++ show nid ++ ": " ++ str
+    msg <- readChan logs
+    hPutStrLn stderr $ show (msgNodeId msg) ++ " Term " ++ show (msgTerm msg)
+      ++ " " ++ show (msgRole msg) ++ ": " ++ msgString msg
     hFlush stderr
   return logs
 
-writeLogger :: Chan LogMessage -> String -> Process ()
-writeLogger logs str = do
-  now <- liftIO getCurrentTime
+writeLogger :: MVar ServerState -> String -> Process ()
+writeLogger mx str = do
+  st  <- readMVar mx
   nid <- getSelfNode
-  liftIO $ writeChan logs (now, nid, str)
+  liftIO $ writeChan (selfLogger st)
+    LogMessage { msgNodeId = nid
+               , msgTerm   = currTerm st
+               , msgRole   = currRole st
+               , msgString = str
+               }
 
 newMailbox :: IO Mailbox
 newMailbox = do
@@ -144,11 +146,12 @@ newMailbox = do
   box    <- newChan
   mNodes <- newMVar []
   void . forkIO . forever $ do
-    (now, nid, str) <- readChan box
-    nidList         <- readMVar mNodes
+    msg     <- readChan box
+    nidList <- readMVar mNodes
+    let nid = msgNodeId msg
     when (nid `notElem` nidList) $ do
-      let timeStr = formatTime defaultTimeLocale "%c" now
-      putStrLn $ timeStr ++ " " ++ show nid ++ ": " ++ str
+      putStrLn $ show nid ++ " Term " ++ show (msgTerm msg)
+        ++ " " ++ show (msgRole msg) ++ ": " ++ msgString msg
       hFlush stdout
     modifyMVar_ mNodes $ return . (nid :)
   return Mailbox { putMsg = start
@@ -160,11 +163,15 @@ registerMailbox mx mailbox = do
   nid <- getSelfNode
   void . spawnLocal . liftIO $ do
     atomically $ isEmptyTMVar (putMsg mailbox) >>= check . not
-    st  <- readMVar mx
-    now <- getCurrentTime
-    let str = show . U.dropWhile ((> commitIndex st) . logIndex)
+    st <- readMVar mx
+    let str = show . U.reverse . U.dropWhile ((> commitIndex st) . logIndex)
               . getLog $ currVec st
-    writeChan (msgBox mailbox) (now, nid, str)
+    writeChan (msgBox mailbox)
+      LogMessage { msgNodeId = nid
+                 , msgTerm   = currTerm st
+                 , msgRole   = currRole st
+                 , msgString = str
+                 }
 
 putMessages :: Mailbox -> IO ()
 putMessages mailbox = atomically $ putTMVar (putMsg mailbox) ()

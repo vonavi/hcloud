@@ -30,10 +30,12 @@ import           Raft.Utils                               (getNextIndex,
                                                            isTermStale,
                                                            nextRandomNum,
                                                            remindTimeout,
-                                                           syncWithTerm)
+                                                           syncWithTerm,
+                                                           writeLogger)
 
 leader :: MVar ServerState -> [NodeId] -> Process ()
 leader mx peers = do
+  writeLogger mx "Hi!"
   -- Initialize nextIndex for each server
   idx <- getNextIndex . currVec <$> readMVar mx
   modifyMVar_ mx
@@ -54,6 +56,7 @@ leader mx peers = do
 
 sendAppendEntries :: MVar ServerState -> NodeId -> Process ()
 sendAppendEntries mx peer = do
+  writeLogger mx $ "sending AppendEntriesReq to " ++ show peer
   st   <- readMVar mx
   node <- getSelfNode
   let nextIdx            = nextIndex st M.! peer
@@ -75,13 +78,19 @@ startCommunications :: MVar ServerState -> [NodeId] -> ProcessId
                     -> Process ProcessId
 startCommunications mx peers heartbeat =
   receiveWait
-  [ match $ \(req :: AppendEntriesReq) ->
+  [ match $ \(req :: AppendEntriesReq) -> do
+      writeLogger mx $ "received AppendEntriesReq from "
+        ++ show (leaderId req) ++ " Term " ++ show (areqTerm req)
       unlessStepDown (areqTerm req) req $ startCommunications mx peers heartbeat
 
-  , match $ \(req :: RequestVoteReq) ->
+  , match $ \(req :: RequestVoteReq) -> do
+      writeLogger mx $ "received RequestVoteReq from "
+        ++ show (vreqCandidateId req) ++ " Term " ++ show (vreqTerm req)
       unlessStepDown (vreqTerm req) req $ startCommunications mx peers heartbeat
 
   , match $ \(res :: AppendEntriesRes) -> do
+      writeLogger mx $ "received AppendEntriesRes from "
+        ++ show (aresFollowerId res) ++ " Term " ++ show (aresTerm res)
       let term = aresTerm res
       unlessStepDown term res . unlessStaleTerm term $ do
         success <- collectAppendEntriesRes mx res
@@ -91,7 +100,9 @@ startCommunications mx peers heartbeat =
           void . spawnLocal $ sendAppendEntries mx peer
         startCommunications mx peers heartbeat
 
-  , match $ \(res :: RequestVoteRes) ->
+  , match $ \(res :: RequestVoteRes) -> do
+      writeLogger mx
+        $ "received RequestVoteRes from Term " ++ show (vresTerm res)
       unlessStepDown (vresTerm res) res $ startCommunications mx peers heartbeat
 
   , match $ \(timeout :: RemindTimeout) ->

@@ -18,10 +18,11 @@ import           Raft.Utils                     (getLastIndex, getLastTerm,
                                                  getMatchIndex, isTermStale,
                                                  randomElectionTimeout,
                                                  remindTimeout, saveSession,
-                                                 syncWithTerm)
+                                                 syncWithTerm, writeLogger)
 
 follower :: MVar ServerState -> Process ()
 follower mx = do
+  writeLogger mx "Hi!"
   eTime    <- randomElectionTimeout $ electionTimeoutMs * 1000
   reminder <- remindTimeout eTime ElectionTimeout
 
@@ -33,6 +34,8 @@ respondToServers :: MVar ServerState -> Process ()
 respondToServers mx =
   receiveWait
   [ match $ \(req :: AppendEntriesReq) -> do
+      writeLogger mx $ "received AppendEntriesReq from "
+        ++ show (leaderId req) ++ " Term " ++ show (areqTerm req)
       let term = areqTerm req
       void $ syncWithTerm mx term
       unlessStaleTerm term $ do
@@ -48,21 +51,34 @@ respondToServers mx =
                            }
 
   , match $ \(req :: RequestVoteReq) -> do
+      writeLogger mx $ "received RequestVoteReq from "
+        ++ show (vreqCandidateId req) ++ " Term " ++ show (vreqTerm req)
       let term = vreqTerm req
       void $ syncWithTerm mx term
       unlessStaleTerm term $ do
         success <- voteForCandidate mx req
         saveSession mx
         stTerm <- currTerm <$> readMVar mx
+
+        writeLogger mx
+          $ if success
+            then "giving a vote for " ++ show (vreqCandidateId req)
+            else "giving no vote for " ++ show (vreqCandidateId req)
         nsendRemote (vreqCandidateId req) raftServerName
           RequestVoteRes { vresTerm    = stTerm
                          , voteGranted = success
                          }
         unless success $ respondToServers mx
 
-  , match $ \(_ :: AppendEntriesRes) -> respondToServers mx
+  , match $ \(res :: AppendEntriesRes) -> do
+      writeLogger mx $ "received AppendEntriesRes from "
+        ++ show (aresFollowerId res) ++ " Term " ++ show (aresTerm res)
+      respondToServers mx
 
-  , match $ \(_ :: RequestVoteRes) -> respondToServers mx
+  , match $ \(res :: RequestVoteRes) -> do
+      writeLogger mx
+        $ "received RequestVoteRes from Term " ++ show (vresTerm res)
+      respondToServers mx
 
     -- If election timeout elapses without receiving AppendEntries RPC
     -- form current leader or granting vote to candidate: convert to

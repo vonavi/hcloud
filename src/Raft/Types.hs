@@ -11,7 +11,7 @@ module Raft.Types
   , LogEntry(..)
   , LogVector(..)
   , RaftParams(..)
-  , LogMessage
+  , LogMessage(..)
   , Mailbox(..)
   , LeaderId
   , Role(..)
@@ -33,7 +33,6 @@ import           Control.Distributed.Process  (NodeId)
 import           Data.Binary                  (Binary)
 import qualified Data.Map.Strict              as M
 import           Data.Serialize               (Serialize)
-import           Data.Time.Clock              (UTCTime)
 import           Data.Typeable                (Typeable)
 import           Data.Vector.Binary           ()
 import           Data.Vector.Serialize        ()
@@ -52,6 +51,8 @@ derivingUnbox "Xorshift32"
   [| Xorshift32 |]
 
 type Term = Int
+data Role = Follower | Candidate | Leader
+          deriving Show
 
 data LogEntry = LogEntry { logSeed  :: Xorshift32
                          , logTerm  :: Term
@@ -69,7 +70,11 @@ newtype LogVector = LogVector { getLog :: U.Vector LogEntry }
                   deriving (Show, Typeable, Generic, Serialize)
 instance Binary LogVector
 
-type LogMessage = (UTCTime, NodeId, String)
+data LogMessage = LogMessage { msgNodeId :: NodeId
+                             , msgTerm   :: Term
+                             , msgRole   :: Role
+                             , msgString :: String
+                             }
 
 data RaftParams = RaftParams { raftPeers   :: [NodeId]
                              , raftSeed    :: Word32
@@ -83,7 +88,6 @@ data Mailbox = Mailbox { putMsg :: TMVar ()
                        }
 
 type LeaderId = NodeId
-data Role     = Follower | Candidate | Leader
 
 data ServerState = ServerState
                    { currTerm    :: Term
@@ -114,7 +118,6 @@ data RequestVoteRes = RequestVoteRes
                       }
                     deriving (Typeable, Generic)
 instance Binary RequestVoteRes
-
 
 data AppendEntriesReq = AppendEntriesReq
                         { areqTerm     :: Term

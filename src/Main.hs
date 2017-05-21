@@ -37,7 +37,7 @@ import           Parameters                       (getParameters)
 import           Raft                             (initRaft)
 import           Raft.Types
 import           Raft.Utils                       (newLogger, newMailbox,
-                                                   putMessages, writeLogger)
+                                                   putMessages)
 import           Types
 
 main :: IO ()
@@ -62,7 +62,7 @@ main = do
                      }
         startServer params ept
       sendThenPutMessages cfg mailbox
-      mapM_ (stopServer logs) connections
+      mapM_ stopServer connections
       mapM_ rmSessionFile files
 
     TestParams cfg -> do
@@ -88,14 +88,11 @@ startServer params ept = do
   tr   <- either (error . show) id
           <$> createTransport (getHost ept) (getPort ept) defaultTCPParameters
   node <- newLocalNode tr initRemoteTable
-  runProcess node $ do
-    writeLogger (raftLogger params) "starting server..."
-    void . spawnLocal $ initRaft params
+  runProcess node . void . spawnLocal $ initRaft params
   return (tr, node)
 
-stopServer :: Chan LogMessage -> Connection -> IO ()
-stopServer logs (tr, node) = do
-  runProcess node $ writeLogger logs "stopping server..."
+stopServer :: Connection -> IO ()
+stopServer (tr, node) = do
   closeTransport tr
   closeLocalNode node
 
@@ -131,7 +128,7 @@ runTest seed logs mailbox = forever $ do
     LT -> do (down, up) <- liftIO
                            $ randomSplit (negate delta) (startEpts nodeCfg)
              liftIO . forM_ down
-               $ \ept -> stopServer logs $ nodeMap nodeCfg M.! mkNodeId ept
+               $ \ept -> stopServer $ nodeMap nodeCfg M.! mkNodeId ept
              let updMap = foldr (M.delete . mkNodeId) (nodeMap nodeCfg) down
              put nodeCfg { stopEpts  = down ++ stopEpts nodeCfg
                          , startEpts = up
