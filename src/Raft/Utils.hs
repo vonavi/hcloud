@@ -160,8 +160,10 @@ registerMailbox mx mailbox = do
   nid <- getSelfNode
   void . spawnLocal . liftIO $ do
     atomically $ isEmptyTMVar (putMsg mailbox) >>= check . not
-    str <- show . currVec <$> readMVar mx
+    st  <- readMVar mx
     now <- getCurrentTime
+    let str = show . U.dropWhile ((> commitIndex st) . logIndex)
+              . getLog $ currVec st
     writeChan (msgBox mailbox) (now, nid, str)
 
 putMessages :: Mailbox -> IO ()
@@ -173,15 +175,16 @@ saveSession mx = do
   let term = currTerm st
       bs   = endPointAddressToByteString . nodeAddress <$> votedFor st
       logs = currVec st
-  liftIO . BC.writeFile (sessionFile st) $ encode (term, bs, logs)
+      cIdx = commitIndex st
+  liftIO . BC.writeFile (sessionFile st) $ encode (term, bs, logs, cIdx)
 
-restoreSession :: FilePath -> Process (Term, Maybe LeaderId, LogVector)
+restoreSession :: FilePath -> Process (Term, Maybe LeaderId, LogVector, Int)
 restoreSession file = do
-  (term, bs, logs) <- liftIO . handle fileHandler
-                      $ either error id . decode <$> BC.readFile file
-  return (term, toVoted bs, logs)
+  (term, bs, logs, cIdx) <- liftIO . handle fileHandler
+                            $ either error id . decode <$> BC.readFile file
+  return (term, toVoted bs, logs, cIdx)
     where fileHandler e
-            | isDoesNotExistError e = return (0, Nothing, LogVector U.empty)
+            | isDoesNotExistError e = return (0, Nothing, LogVector U.empty, 0)
             | otherwise             = throwIO e
 
           toVoted :: Maybe BC.ByteString -> Maybe LeaderId

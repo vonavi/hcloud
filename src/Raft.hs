@@ -19,13 +19,13 @@ import           Raft.Utils                     (registerMailbox,
 
 initRaft :: RaftParams -> Process ()
 initRaft params = do
-  (term, voted, logs) <- restoreSession $ raftFile params
+  (term, voted, logs, cIdx) <- restoreSession $ raftFile params
   let peers = raftPeers params
   mx <- newMVar ServerState { currTerm    = term
                             , votedFor    = voted
                             , currRole    = Follower
                             , currVec     = logs
-                            , commitIndex = 0
+                            , commitIndex = cIdx
                             , lastApplied = 0
                             , nextIndex   = M.empty
                             , matchIndex  = M.fromList $ zip peers (repeat 0)
