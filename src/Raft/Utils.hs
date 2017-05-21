@@ -9,6 +9,8 @@ module Raft.Utils
   , randomElectionTimeout
   , getMatchIndex
   , getNextIndex
+  , getLastIndex
+  , getLastTerm
   , nextRandomNum
   , newLogger
   , writeLogger
@@ -102,6 +104,16 @@ getMatchIndex v | U.null logs = 0
 
 getNextIndex :: LogVector -> Int
 getNextIndex = succ . getMatchIndex
+
+getLastIndex :: LogVector -> Int
+getLastIndex v | U.null logs = 0
+               | otherwise   = logIndex $ U.head logs
+  where logs = getLog v
+
+getLastTerm :: LogVector -> Term
+getLastTerm v | U.null logs = 0
+              | otherwise   = logTerm $ U.head logs
+  where logs = getLog v
 
 -- Iterates the random generator for 32 bits
 nextRandomNum :: Xorshift32 -> Xorshift32

@@ -11,10 +11,10 @@ import           Control.Distributed.Process    (NodeId, Process, exit,
                                                  nsendRemote, receiveWait,
                                                  spawnLocal)
 import           Control.Monad                  (forM_, unless, void)
-import qualified Data.Vector.Unboxed            as U
 
 import           Raft.Types
-import           Raft.Utils                     (incCurrentTerm, isTermStale,
+import           Raft.Utils                     (getLastIndex, getLastTerm,
+                                                 incCurrentTerm, isTermStale,
                                                  randomElectionTimeout,
                                                  remindTimeout, syncWithTerm)
 
@@ -34,19 +34,13 @@ sendRequestVote :: MVar ServerState -> NodeId -> Process ()
 sendRequestVote mx peer = do
   st   <- readMVar mx
   node <- getSelfNode
-  let stLog = getLog $ currVec st
+  let stLog = currVec st
   nsendRemote peer raftServerName
-    $ if U.null stLog
-      then RequestVoteReq { vreqTerm        = currTerm st
-                          , vreqCandidateId = node
-                          , lastLogIndex    = 0
-                          , lastLogTerm     = 0
-                          }
-      else RequestVoteReq { vreqTerm        = currTerm st
-                          , vreqCandidateId = node
-                          , lastLogIndex    = logIndex $ U.head stLog
-                          , lastLogTerm     = logTerm $ U.head stLog
-                          }
+    RequestVoteReq { vreqTerm        = currTerm st
+                   , vreqCandidateId = node
+                   , lastLogIndex    = getLastIndex stLog
+                   , lastLogTerm     = getLastTerm stLog
+                   }
 
 collectVotes :: MVar ServerState -> Int -> Process ()
 collectVotes mx 0 = modifyMVar_ mx $ \st -> return st { currRole = Leader }

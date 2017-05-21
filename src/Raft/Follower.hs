@@ -14,7 +14,8 @@ import           Data.Monoid                    ((<>))
 import qualified Data.Vector.Unboxed            as U
 
 import           Raft.Types
-import           Raft.Utils                     (getMatchIndex, isTermStale,
+import           Raft.Utils                     (getLastIndex, getLastTerm,
+                                                 getMatchIndex, isTermStale,
                                                  randomElectionTimeout,
                                                  remindTimeout, saveSession,
                                                  syncWithTerm)
@@ -113,9 +114,9 @@ voteForCandidate mx req = do
       freeVote  = case votedFor st of
                     Nothing -> True
                     Just c  -> c == candId
-      stLog     = getLog $ currVec st
-      lastTerm  = if U.null stLog then 0 else logTerm (U.head stLog)
-      lastIndex = if U.null stLog then 0 else logIndex (U.head stLog)
+      stLog     = currVec st
+      lastIndex = getLastIndex stLog
+      lastTerm  = getLastTerm stLog
       cmpLogs   = compare (lastLogTerm req) lastTerm
                   <> compare (lastLogIndex req) lastIndex
   case () of
