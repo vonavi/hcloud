@@ -10,8 +10,8 @@ import           Control.Concurrent.MVar.Lifted           (MVar, modifyMVar_,
 import           Control.Distributed.Process              (NodeId, Process,
                                                            exit, forward,
                                                            getSelfNode,
-                                                           getSelfPid, match,
-                                                           nsendRemote,
+                                                           getSelfPid, link,
+                                                           match, nsendRemote,
                                                            receiveWait,
                                                            spawnLocal,
                                                            wrapMessage)
@@ -36,7 +36,10 @@ candidate mx peers = do
   reminder <- remindTimeout eTime ElectionTimeout
 
   -- Send RequestVote RPCs to all other servers
-  void . spawnLocal . forM_ peers $ sendRequestVote mx
+  pid <- getSelfPid
+  void . spawnLocal $ do
+    link pid
+    forM_ peers $ sendRequestVote mx
 
   collectVotes mx $ (length peers + 1) `div` 2
   exit reminder ()

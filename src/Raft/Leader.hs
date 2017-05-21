@@ -11,8 +11,8 @@ import           Control.Concurrent.MVar.Lifted           (MVar, modifyMVar_,
 import           Control.Distributed.Process              (NodeId, Process,
                                                            ProcessId, exit,
                                                            forward, getSelfNode,
-                                                           getSelfPid, match,
-                                                           nsendRemote,
+                                                           getSelfPid, link,
+                                                           match, nsendRemote,
                                                            receiveWait, send,
                                                            spawnLocal,
                                                            wrapMessage)
@@ -35,6 +35,7 @@ import           Raft.Utils                               (getNextIndex,
 
 leader :: MVar ServerState -> [NodeId] -> Process ()
 leader mx peers = do
+  pid <- getSelfPid
   writeLogger mx "Hi!"
   -- Initialize nextIndex for each server
   idx <- getNextIndex . currVec <$> readMVar mx
@@ -42,13 +43,16 @@ leader mx peers = do
     $ \st -> return st { nextIndex = M.fromList $ zip peers (repeat idx) }
 
   -- Send initial empty AppendEntries RPCs (heartbeat) to each server
-  void . spawnLocal . forM_ peers $ sendAppendEntries mx
+  void . spawnLocal $ do
+    link pid
+    forM_ peers $ sendAppendEntries mx
 
   -- Start to serve client requests
-  pid    <- getSelfPid
-  client <- spawnLocal . forever $ do
-    threadDelay $ sendIntervalMs * 1000
-    send pid SendIntervalTimeout
+  client <- spawnLocal $ do
+    link pid
+    forever $ do
+      threadDelay $ sendIntervalMs * 1000
+      send pid SendIntervalTimeout
 
   heartbeat <- remindHeartbeat
   startCommunications mx peers heartbeat >>= flip exit ()
@@ -97,7 +101,8 @@ startCommunications mx peers heartbeat =
         unless success $ do
           let peer = aresFollowerId res
           decrementNextIndex mx peer
-          void . spawnLocal $ sendAppendEntries mx peer
+          pid <- getSelfPid
+          void . spawnLocal $ link pid >> sendAppendEntries mx peer
         startCommunications mx peers heartbeat
 
   , match $ \(res :: RequestVoteRes) -> do
@@ -110,12 +115,18 @@ startCommunications mx peers heartbeat =
         SendIntervalTimeout -> do
           exit heartbeat ()
           modifyMVar_ mx $ return . newClientEntry
-          void . spawnLocal . forM_ peers $ sendAppendEntries mx
+          pid <- getSelfPid
+          void . spawnLocal $ do
+            link pid
+            forM_ peers $ sendAppendEntries mx
           remindHeartbeat >>= startCommunications mx peers
 
         HeartbeatTimeout    -> do
           exit heartbeat ()
-          void . spawnLocal . forM_ peers $ sendAppendEntries mx
+          pid <- getSelfPid
+          void . spawnLocal $ do
+            link pid
+            forM_ peers $ sendAppendEntries mx
           remindHeartbeat >>= startCommunications mx peers
 
         _                   -> startCommunications mx peers heartbeat

@@ -40,8 +40,8 @@ import           Control.Distributed.Process                  (NodeId (..),
                                                                ProcessId,
                                                                getSelfNode,
                                                                getSelfPid,
-                                                               liftIO, send,
-                                                               spawnLocal)
+                                                               liftIO, link,
+                                                               send, spawnLocal)
 import           Control.Distributed.Process.MonadBaseControl ()
 import           Control.Exception                            (handle, throwIO)
 import           Control.Monad                                (forever, void,
@@ -87,6 +87,7 @@ remindTimeout :: Int -> RemindTimeout -> Process ProcessId
 remindTimeout micros timeout = do
   pid <- getSelfPid
   spawnLocal $ do
+    link pid
     threadDelay micros
     send pid timeout
 
@@ -160,18 +161,21 @@ newMailbox = do
 
 registerMailbox :: MVar ServerState -> Mailbox -> Process ()
 registerMailbox mx mailbox = do
+  pid <- getSelfPid
   nid <- getSelfNode
-  void . spawnLocal . liftIO $ do
-    atomically $ isEmptyTMVar (putMsg mailbox) >>= check . not
-    st <- readMVar mx
-    let str = show . U.reverse . U.dropWhile ((> commitIndex st) . logIndex)
-              . getLog $ currVec st
-    writeChan (msgBox mailbox)
-      LogMessage { msgNodeId = nid
-                 , msgTerm   = currTerm st
-                 , msgRole   = currRole st
-                 , msgString = str
-                 }
+  void . spawnLocal $ do
+    link pid
+    liftIO $ do
+      atomically $ isEmptyTMVar (putMsg mailbox) >>= check . not
+      st <- readMVar mx
+      let str = show . U.reverse . U.dropWhile ((> commitIndex st) . logIndex)
+                . getLog $ currVec st
+      writeChan (msgBox mailbox)
+        LogMessage { msgNodeId = nid
+                   , msgTerm   = currTerm st
+                   , msgRole   = currRole st
+                   , msgString = str
+                   }
 
 putMessages :: Mailbox -> IO ()
 putMessages mailbox = atomically $ putTMVar (putMsg mailbox) ()
