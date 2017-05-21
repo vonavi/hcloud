@@ -9,13 +9,12 @@ import           Control.Concurrent               (forkIO, killThread,
                                                    threadDelay)
 import           Control.Concurrent.Async         (forConcurrently)
 import           Control.Concurrent.Chan          (Chan)
-import           Control.Distributed.Process      (NodeId (..), liftIO,
-                                                   spawnLocal)
-import           Control.Distributed.Process.Node (closeLocalNode,
+import           Control.Distributed.Process      (NodeId (..), exit, liftIO)
+import           Control.Distributed.Process.Node (closeLocalNode, forkProcess,
                                                    initRemoteTable,
                                                    newLocalNode, runProcess)
 import           Control.Exception                (catch, throwIO)
-import           Control.Monad                    (forM_, forever, void)
+import           Control.Monad                    (forM_, forever)
 import           Control.Monad.Trans.State        (StateT, evalStateT, get, put)
 import qualified Data.ByteString.Char8            as BC
 import           Data.List                        (delete)
@@ -88,13 +87,14 @@ startServer params ept = do
   tr   <- either (error . show) id
           <$> createTransport (getHost ept) (getPort ept) defaultTCPParameters
   node <- newLocalNode tr initRemoteTable
-  runProcess node . void . spawnLocal $ initRaft params
-  return (tr, node)
+  pid <- forkProcess node $ initRaft params
+  return (pid, node, tr)
 
 stopServer :: Connection -> IO ()
-stopServer (tr, node) = do
-  closeTransport tr
+stopServer (pid, node, tr) = do
+  runProcess node $ exit pid ()
   closeLocalNode node
+  closeTransport tr
 
 runTest :: Word32 -> Chan LogMessage -> Mailbox -> StateT NodeConfig IO ()
 runTest seed logs mailbox = forever $ do

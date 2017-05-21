@@ -8,7 +8,7 @@ module Types
   , receiverName
   ) where
 
-import           Control.Distributed.Process      (NodeId)
+import           Control.Distributed.Process      (NodeId, ProcessId)
 import           Control.Distributed.Process.Node (LocalNode)
 import           Data.Char                        (isDigit)
 import qualified Data.Map.Strict                  as M
@@ -38,7 +38,7 @@ data Config = Config { sendPeriod  :: Int
 data Parameters = RunParams Config
                 | TestParams Config
 
-type Connection = (Transport, LocalNode)
+type Connection = (ProcessId, LocalNode, Transport)
 data NodeConfig = NodeConfig { stopEpts  :: [NodeEndPoint]
                              , startEpts :: [NodeEndPoint]
                              , allNodes  :: [NodeId]
