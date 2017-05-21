@@ -5,24 +5,32 @@ module Raft.Leader
     leader
   ) where
 
-import           Control.Concurrent.Lifted      (threadDelay)
-import           Control.Concurrent.MVar.Lifted (MVar, modifyMVar_, readMVar)
-import           Control.Distributed.Process    (NodeId, Process, ProcessId,
-                                                 exit, getSelfNode, getSelfPid,
-                                                 match, nsendRemote,
-                                                 receiveWait, send, spawnLocal)
-import           Control.Monad                  (forM_, forever, unless, void,
-                                                 when)
-import           Data.List                      (sortBy)
-import qualified Data.Map.Strict                as M
-import           Data.Maybe                     (fromJust)
-import           Data.Ord                       (Down (..), comparing)
-import qualified Data.Vector.Unboxed            as U
+import           Control.Concurrent.Lifted                (threadDelay)
+import           Control.Concurrent.MVar.Lifted           (MVar, modifyMVar_,
+                                                           readMVar)
+import           Control.Distributed.Process              (NodeId, Process,
+                                                           ProcessId, exit,
+                                                           forward, getSelfNode,
+                                                           getSelfPid, match,
+                                                           nsendRemote,
+                                                           receiveWait, send,
+                                                           spawnLocal,
+                                                           wrapMessage)
+import           Control.Distributed.Process.Serializable (Serializable)
+import           Control.Monad                            (forM_, forever,
+                                                           unless, void, when)
+import           Data.List                                (sortBy)
+import qualified Data.Map.Strict                          as M
+import           Data.Maybe                               (fromJust)
+import           Data.Ord                                 (Down (..), comparing)
+import qualified Data.Vector.Unboxed                      as U
 
 import           Raft.Types
-import           Raft.Utils                     (getNextIndex, isTermStale,
-                                                 nextRandomNum, remindTimeout,
-                                                 syncWithTerm)
+import           Raft.Utils                               (getNextIndex,
+                                                           isTermStale,
+                                                           nextRandomNum,
+                                                           remindTimeout,
+                                                           syncWithTerm)
 
 leader :: MVar ServerState -> [NodeId] -> Process ()
 leader mx peers = do
@@ -84,7 +92,7 @@ startCommunications mx peers heartbeat =
 
   , match $ \(res :: AppendEntriesRes) -> do
       let term = aresTerm res
-      unlessStepDown term . unlessStaleTerm term $ do
+      unlessStepDown term res . unlessStaleTerm term $ do
         success <- collectAppendEntriesRes mx res
         unless success $ do
           let peer = aresFollowerId res
@@ -92,14 +100,21 @@ startCommunications mx peers heartbeat =
           void . spawnLocal $ sendAppendEntries mx peer
         startCommunications mx peers heartbeat
 
-  , match $ \(_ :: AppendEntriesReq) -> startCommunications mx peers heartbeat
-  , match $ \(_ :: RequestVoteRes) -> startCommunications mx peers heartbeat
-  , match $ \(_ :: RequestVoteReq) -> startCommunications mx peers heartbeat
+  , match $ \(req :: AppendEntriesReq) ->
+      unlessStepDown (areqTerm req) req $ startCommunications mx peers heartbeat
+  , match $ \(res :: RequestVoteRes) ->
+      unlessStepDown (vresTerm res) res $ startCommunications mx peers heartbeat
+  , match $ \(req :: RequestVoteReq) ->
+      unlessStepDown (vreqTerm req) req $ startCommunications mx peers heartbeat
   ]
-  where unlessStepDown :: Term -> Process ProcessId -> Process ProcessId
-        unlessStepDown term act = do
+  where unlessStepDown :: forall a. Serializable a => Term -> a
+                       -> Process ProcessId -> Process ProcessId
+        unlessStepDown term msg act = do
           stepDown <- syncWithTerm mx term
-          if stepDown then return heartbeat else act
+          if stepDown
+            then do getSelfPid >>= forward (wrapMessage msg)
+                    return heartbeat
+            else act
 
         unlessStaleTerm :: Term -> Process ProcessId -> Process ProcessId
         unlessStaleTerm term act = do

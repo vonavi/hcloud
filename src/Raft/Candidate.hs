@@ -5,18 +5,27 @@ module Raft.Candidate
     candidate
   ) where
 
-import           Control.Concurrent.MVar.Lifted (MVar, modifyMVar_, readMVar)
-import           Control.Distributed.Process    (NodeId, Process, exit,
-                                                 getSelfNode, match,
-                                                 nsendRemote, receiveWait,
-                                                 spawnLocal)
-import           Control.Monad                  (forM_, unless, void)
+import           Control.Concurrent.MVar.Lifted           (MVar, modifyMVar_,
+                                                           readMVar)
+import           Control.Distributed.Process              (NodeId, Process,
+                                                           exit, forward,
+                                                           getSelfNode,
+                                                           getSelfPid, match,
+                                                           nsendRemote,
+                                                           receiveWait,
+                                                           spawnLocal,
+                                                           wrapMessage)
+import           Control.Distributed.Process.Serializable (Serializable)
+import           Control.Monad                            (forM_, void)
 
 import           Raft.Types
-import           Raft.Utils                     (getLastIndex, getLastTerm,
-                                                 incCurrentTerm, isTermStale,
-                                                 randomElectionTimeout,
-                                                 remindTimeout, syncWithTerm)
+import           Raft.Utils                               (getLastIndex,
+                                                           getLastTerm,
+                                                           incCurrentTerm,
+                                                           isTermStale,
+                                                           randomElectionTimeout,
+                                                           remindTimeout,
+                                                           syncWithTerm)
 
 candidate :: MVar ServerState -> [NodeId] -> Process ()
 candidate mx peers = do
@@ -54,23 +63,28 @@ collectVotes mx n =
 
   , match $ \(res :: RequestVoteRes) -> do
       let term = vresTerm res
-      unlessStepDown term . unlessStaleTerm term
+      unlessStepDown term res . unlessStaleTerm term
         $ if voteGranted res
           then collectVotes mx (pred n)
           else collectVotes mx n
 
   , match $ \(req :: AppendEntriesReq) -> do
       let term = areqTerm req
-      unlessStepDown term . unlessStaleTerm term
+      unlessStepDown term req . unlessStaleTerm term
         . modifyMVar_ mx $ \st -> return st { currRole = Follower }
 
-  , match $ \(_ :: RequestVoteReq) -> collectVotes mx n
-  , match $ \(_ :: AppendEntriesRes) -> collectVotes mx n
+  , match $ \(req :: RequestVoteReq) ->
+      unlessStepDown (vreqTerm req) req $ collectVotes mx n
+  , match $ \(res :: AppendEntriesRes) ->
+      unlessStepDown (aresTerm res) res $ collectVotes mx n
   ]
-  where unlessStepDown :: Term -> Process () -> Process ()
-        unlessStepDown term act = do
+  where unlessStepDown :: forall a. Serializable a => Term -> a -> Process ()
+                       -> Process ()
+        unlessStepDown term msg act = do
           stepDown <- syncWithTerm mx term
-          unless stepDown act
+          if stepDown
+            then getSelfPid >>= forward (wrapMessage msg)
+            else act
 
         unlessStaleTerm :: Term -> Process () -> Process ()
         unlessStaleTerm term act = do
