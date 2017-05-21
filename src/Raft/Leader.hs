@@ -37,10 +37,10 @@ leader mx peers = do
   -- Start to serve client requests
   pid    <- getSelfPid
   client <- spawnLocal . forever $ do
-    threadDelay sendIntervalMs
+    threadDelay $ sendIntervalMs * 1000
     send pid SendIntervalTimeout
 
-  heartbeat <- remindTimeout heartbeatTimeoutMs HeartbeatTimeout
+  heartbeat <- remindHeartbeat
   startCommunications mx peers heartbeat >>= flip exit ()
   exit client ()
 
@@ -73,14 +73,12 @@ startCommunications mx peers heartbeat =
           exit heartbeat ()
           modifyMVar_ mx $ return . newClientEntry
           void . spawnLocal . forM_ peers $ sendAppendEntries mx
-          remindTimeout heartbeatTimeoutMs HeartbeatTimeout
-            >>= startCommunications mx peers
+          remindHeartbeat >>= startCommunications mx peers
 
         HeartbeatTimeout    -> do
           exit heartbeat ()
           void . spawnLocal . forM_ peers $ sendAppendEntries mx
-          remindTimeout heartbeatTimeoutMs HeartbeatTimeout
-            >>= startCommunications mx peers
+          remindHeartbeat >>= startCommunications mx peers
 
         _                   -> startCommunications mx peers heartbeat
 
@@ -151,3 +149,6 @@ newClientEntry st = st { currVec = LogVector $ U.cons entry oldLog }
                           , logTerm  = currTerm st
                           , logIndex = getNextIndex $ LogVector oldLog
                           }
+
+remindHeartbeat :: Process ProcessId
+remindHeartbeat = remindTimeout (heartbeatTimeoutMs * 1000) HeartbeatTimeout
