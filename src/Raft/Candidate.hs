@@ -55,11 +55,16 @@ collectVotes :: MVar ServerState -> Int -> Process ()
 collectVotes mx 0 = modifyMVar_ mx $ \st -> return st { currRole = Leader }
 collectVotes mx n =
   receiveWait
-  [ -- If election timeout elapses: start new election
-    match $ \(timeout :: RemindTimeout) ->
-      case timeout of
-        ElectionTimeout -> return ()
-        _               -> collectVotes mx n
+  [ match $ \(req :: AppendEntriesReq) -> do
+      let term = areqTerm req
+      unlessStepDown term req . unlessStaleTerm term
+        . modifyMVar_ mx $ \st -> return st { currRole = Follower }
+
+  , match $ \(req :: RequestVoteReq) ->
+      unlessStepDown (vreqTerm req) req $ collectVotes mx n
+
+  , match $ \(res :: AppendEntriesRes) ->
+      unlessStepDown (aresTerm res) res $ collectVotes mx n
 
   , match $ \(res :: RequestVoteRes) -> do
       let term = vresTerm res
@@ -68,15 +73,11 @@ collectVotes mx n =
           then collectVotes mx (pred n)
           else collectVotes mx n
 
-  , match $ \(req :: AppendEntriesReq) -> do
-      let term = areqTerm req
-      unlessStepDown term req . unlessStaleTerm term
-        . modifyMVar_ mx $ \st -> return st { currRole = Follower }
-
-  , match $ \(req :: RequestVoteReq) ->
-      unlessStepDown (vreqTerm req) req $ collectVotes mx n
-  , match $ \(res :: AppendEntriesRes) ->
-      unlessStepDown (aresTerm res) res $ collectVotes mx n
+    -- If election timeout elapses: start new election
+  , match $ \(timeout :: RemindTimeout) ->
+      case timeout of
+        ElectionTimeout -> return ()
+        _               -> collectVotes mx n
   ]
   where unlessStepDown :: forall a. Serializable a => Term -> a -> Process ()
                        -> Process ()

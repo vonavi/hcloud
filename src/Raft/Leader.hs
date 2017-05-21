@@ -75,7 +75,26 @@ startCommunications :: MVar ServerState -> [NodeId] -> ProcessId
                     -> Process ProcessId
 startCommunications mx peers heartbeat =
   receiveWait
-  [ match $ \(timeout :: RemindTimeout) ->
+  [ match $ \(req :: AppendEntriesReq) ->
+      unlessStepDown (areqTerm req) req $ startCommunications mx peers heartbeat
+
+  , match $ \(req :: RequestVoteReq) ->
+      unlessStepDown (vreqTerm req) req $ startCommunications mx peers heartbeat
+
+  , match $ \(res :: AppendEntriesRes) -> do
+      let term = aresTerm res
+      unlessStepDown term res . unlessStaleTerm term $ do
+        success <- collectAppendEntriesRes mx res
+        unless success $ do
+          let peer = aresFollowerId res
+          decrementNextIndex mx peer
+          void . spawnLocal $ sendAppendEntries mx peer
+        startCommunications mx peers heartbeat
+
+  , match $ \(res :: RequestVoteRes) ->
+      unlessStepDown (vresTerm res) res $ startCommunications mx peers heartbeat
+
+  , match $ \(timeout :: RemindTimeout) ->
       case timeout of
         SendIntervalTimeout -> do
           exit heartbeat ()
@@ -89,23 +108,6 @@ startCommunications mx peers heartbeat =
           remindHeartbeat >>= startCommunications mx peers
 
         _                   -> startCommunications mx peers heartbeat
-
-  , match $ \(res :: AppendEntriesRes) -> do
-      let term = aresTerm res
-      unlessStepDown term res . unlessStaleTerm term $ do
-        success <- collectAppendEntriesRes mx res
-        unless success $ do
-          let peer = aresFollowerId res
-          decrementNextIndex mx peer
-          void . spawnLocal $ sendAppendEntries mx peer
-        startCommunications mx peers heartbeat
-
-  , match $ \(req :: AppendEntriesReq) ->
-      unlessStepDown (areqTerm req) req $ startCommunications mx peers heartbeat
-  , match $ \(res :: RequestVoteRes) ->
-      unlessStepDown (vresTerm res) res $ startCommunications mx peers heartbeat
-  , match $ \(req :: RequestVoteReq) ->
-      unlessStepDown (vreqTerm req) req $ startCommunications mx peers heartbeat
   ]
   where unlessStepDown :: forall a. Serializable a => Term -> a
                        -> Process ProcessId -> Process ProcessId

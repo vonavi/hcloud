@@ -32,16 +32,7 @@ follower mx = do
 respondToServers :: MVar ServerState -> Process ()
 respondToServers mx =
   receiveWait
-  [ -- If election timeout elapses without receiving AppendEntries RPC
-    -- form current leader or granting vote to candidate: convert to
-    -- candidate.
-    match $ \(timeout :: RemindTimeout) ->
-      case timeout of
-        ElectionTimeout -> modifyMVar_ mx
-                           $ \st -> return st { currRole = Candidate }
-        _               -> respondToServers mx
-
-  , match $ \(req :: AppendEntriesReq) -> do
+  [ match $ \(req :: AppendEntriesReq) -> do
       let term = areqTerm req
       void $ syncWithTerm mx term
       unlessStaleTerm term $ do
@@ -70,7 +61,18 @@ respondToServers mx =
         unless success $ respondToServers mx
 
   , match $ \(_ :: AppendEntriesRes) -> respondToServers mx
+
   , match $ \(_ :: RequestVoteRes) -> respondToServers mx
+
+    -- If election timeout elapses without receiving AppendEntries RPC
+    -- form current leader or granting vote to candidate: convert to
+    -- candidate.
+  , match $ \(timeout :: RemindTimeout) ->
+      case timeout of
+        ElectionTimeout -> modifyMVar_ mx
+                           $ \st -> return st { currRole = Candidate }
+        _               -> respondToServers mx
+
   ]
   where unlessStaleTerm :: Term -> Process () -> Process ()
         unlessStaleTerm term act = do
