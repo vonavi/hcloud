@@ -18,7 +18,7 @@ import           Control.Distributed.Process              (NodeId, Process,
                                                            wrapMessage)
 import           Control.Distributed.Process.Serializable (Serializable)
 import           Control.Monad                            (forM_, forever,
-                                                           unless, void, when)
+                                                           unless, when)
 import           Data.List                                (sortBy)
 import qualified Data.Map.Strict                          as M
 import           Data.Maybe                               (fromJust)
@@ -43,9 +43,7 @@ leader mx peers = do
     $ \st -> return st { nextIndex = M.fromList $ zip peers (repeat idx) }
 
   -- Send initial empty AppendEntries RPCs (heartbeat) to each server
-  void . spawnLocal $ do
-    link pid
-    forM_ peers $ sendAppendEntries mx
+  forM_ peers $ sendAppendEntries mx
 
   -- Start to serve client requests
   client <- spawnLocal $ do
@@ -101,8 +99,7 @@ startCommunications mx peers heartbeat =
         unless success $ do
           let peer = aresFollowerId res
           decrementNextIndex mx peer
-          pid <- getSelfPid
-          void . spawnLocal $ link pid >> sendAppendEntries mx peer
+          sendAppendEntries mx peer
         startCommunications mx peers heartbeat
 
   , match $ \(res :: RequestVoteRes) -> do
@@ -115,18 +112,12 @@ startCommunications mx peers heartbeat =
         SendIntervalTimeout -> do
           exit heartbeat ()
           modifyMVar_ mx $ return . newClientEntry
-          pid <- getSelfPid
-          void . spawnLocal $ do
-            link pid
-            forM_ peers $ sendAppendEntries mx
+          forM_ peers $ sendAppendEntries mx
           remindHeartbeat >>= startCommunications mx peers
 
         HeartbeatTimeout    -> do
           exit heartbeat ()
-          pid <- getSelfPid
-          void . spawnLocal $ do
-            link pid
-            forM_ peers $ sendAppendEntries mx
+          forM_ peers $ sendAppendEntries mx
           remindHeartbeat >>= startCommunications mx peers
 
         _                   -> startCommunications mx peers heartbeat

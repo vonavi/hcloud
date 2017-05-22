@@ -10,13 +10,12 @@ import           Control.Concurrent.MVar.Lifted           (MVar, modifyMVar_,
 import           Control.Distributed.Process              (NodeId, Process,
                                                            exit, forward,
                                                            getSelfNode,
-                                                           getSelfPid, link,
-                                                           match, nsendRemote,
+                                                           getSelfPid, match,
+                                                           nsendRemote,
                                                            receiveWait,
-                                                           spawnLocal,
                                                            wrapMessage)
 import           Control.Distributed.Process.Serializable (Serializable)
-import           Control.Monad                            (forM_, void)
+import           Control.Monad                            (forM_)
 
 import           Raft.Types
 import           Raft.Utils                               (getLastIndex,
@@ -36,10 +35,7 @@ candidate mx peers = do
   reminder <- remindTimeout eTime ElectionTimeout
 
   -- Send RequestVote RPCs to all other servers
-  pid <- getSelfPid
-  void . spawnLocal $ do
-    link pid
-    forM_ peers $ sendRequestVote mx
+  forM_ peers $ sendRequestVote mx
 
   collectVotes mx $ (length peers + 1) `div` 2
   exit reminder ()
