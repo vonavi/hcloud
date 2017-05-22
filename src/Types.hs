@@ -5,7 +5,6 @@ module Types
   , Parameters(..)
   , Connection
   , NodeConfig(..)
-  , receiverName
   ) where
 
 import           Control.Distributed.Process      (NodeId, ProcessId)
@@ -29,22 +28,33 @@ instance Read NodeEndPoint where
   readsPrec _ = readP_to_S
                 $ NodeEndPoint <$> munch1 (/= ':') <* get <*> munch1 isDigit
 
-data Config = Config { sendPeriod  :: Int
-                     , gracePeriod :: Int
-                     , msgSeed     :: Word32
+-- | Configuration of cluster
+data Config = Config { sendPeriod  :: {-# UNPACK #-} !Int
+                       -- ^ sending period, in seconds
+                     , gracePeriod :: {-# UNPACK #-} !Int
+                       -- ^ grace period, in seconds
+                     , msgSeed     :: {-# UNPACK #-} !Word32
+                       -- ^ seed value for PRNG
                      , nodeConf    :: FilePath
+                       -- ^ configuration file with nodes
                      }
 
+-- | Parameters of command targets
 data Parameters = RunParams Config
                 | TestParams Config
 
+-- | Information to close a connection
 type Connection = (ProcessId, LocalNode, Transport)
-data NodeConfig = NodeConfig { stopEpts  :: [NodeEndPoint]
-                             , startEpts :: [NodeEndPoint]
-                             , allNodes  :: [NodeId]
-                             , nodeMap   :: M.Map NodeId Connection
-                             , fileMap   :: M.Map NodeId FilePath
-                             }
-
-receiverName :: String
-receiverName = "receiver"
+-- | Cluster's information to be used in test target
+data NodeConfig = NodeConfig
+                  { stopEpts  :: [NodeEndPoint]
+                    -- ^ disconnected node endpoints
+                  , startEpts :: [NodeEndPoint]
+                    -- ^ connected node endpoints
+                  , allNodes  :: [NodeId]
+                    -- ^ all cluster's nodes
+                  , nodeMap   :: M.Map NodeId Connection
+                    -- ^ map connection information to nodes
+                  , fileMap   :: M.Map NodeId FilePath
+                    -- ^ map session files to nodes
+                  }

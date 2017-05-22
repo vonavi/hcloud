@@ -29,7 +29,7 @@ getConfig = Config
                               <> help "Grace period, in seconds" )
             <*> option auto ( long "with-seed"
                               <> metavar "INT"
-                              <> help "Seed value for RNG" )
+                              <> help "Seed value for PRNG" )
             <*> strOption ( long "config"
                             <> metavar "FILE"
                             <> help "Configuration file with nodes" )
