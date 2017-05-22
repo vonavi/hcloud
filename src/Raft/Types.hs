@@ -44,7 +44,7 @@ import           Data.Word                    (Word32)
 import           GHC.Generics                 (Generic)
 
 -- | Seed for Xorshift32 pseudo-random number generator
-newtype Xorshift32 = Xorshift32 { getWord32 :: Word32 }
+newtype Xorshift32 = Xorshift32 { word32 :: Word32 }
                    deriving (Show, Typeable, Generic, Serialize)
 instance Binary Xorshift32
 
@@ -217,13 +217,14 @@ instance Binary RemindTimeout
 
 -- | Server's persistent state
 data PersistentState = PersistentState
-                       { sessTerm     :: {-# UNPACK #-} !Term
+                       { sessTerm      :: {-# UNPACK #-} !Term
                          -- ^ Latest term server has seen
-                       , sessVotedFor :: Maybe BC.ByteString
+                       , sessVotedFor  :: Maybe BC.ByteString
                          -- ^ CandidateId that received vote in
                          --   current term
-                       , sessVec      :: LogVector
+                       , sessVec       :: LogVector
                          -- ^ Log entries
+                       , sessCommitIdx :: {-# UNPACK #-} !Int
                        }
                      deriving (Generic, Serialize)
 

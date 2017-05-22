@@ -28,7 +28,7 @@ initRaft params = do
                                             <$> sessVotedFor session
                             , currRole    = Follower
                             , currVec     = sessVec session
-                            , commitIndex = 0
+                            , commitIndex = sessCommitIdx session
                             , lastApplied = 0
                             , nextIndex   = M.empty
                             , matchIndex  = M.fromList $ zip peers (repeat 0)

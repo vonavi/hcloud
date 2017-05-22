@@ -50,14 +50,16 @@ import           Control.Monad.Trans.Control                  (MonadBaseControl)
 import           Data.Bits                                    (shiftL, shiftR,
                                                                xor)
 import qualified Data.ByteString.Char8                        as BC
+import           Data.Function                                (on)
 import           Data.Serialize                               (decode, encode)
 import qualified Data.Vector.Unboxed                          as U
+import           Data.Word                                    (Word32)
 import           Network.Transport                            (EndPointAddress (..))
 import           System.IO                                    (hFlush, stderr,
                                                                stdout)
 import           System.IO.Error                              (isDoesNotExistError)
 import           System.Random                                (randomRIO)
-import           Text.Printf                                  (hPrintf, printf)
+import           Text.Printf                                  (hPrintf)
 
 import           Raft.Types
 
@@ -151,8 +153,7 @@ newMailbox = do
     nidList <- readMVar mNodes
     let nid = msgNodeId msg
     when (nid `notElem` nidList) $ do
-      printf "%s Term %03d %-9s: %s\n" (show $ msgNodeId msg)
-        (msgTerm msg) (show $ msgRole msg) (msgString msg)
+      putStrLn $ show nid ++ ": " ++ msgString msg
       hFlush stdout
     modifyMVar_ mNodes $ return . (nid :)
   return Mailbox { putMsg = start
@@ -168,14 +169,20 @@ registerMailbox mx mailbox = do
     liftIO $ do
       atomically $ isEmptyTMVar (putMsg mailbox) >>= check . not
       st <- readMVar mx
-      let str = show . U.reverse . U.dropWhile ((> commitIndex st) . logIndex)
-                . getLog $ currVec st
+      let commitIdx = commitIndex st
+          commitLog = U.dropWhile ((> commitIdx) . logIndex)
+                      . getLog $ currVec st
       writeChan (msgBox mailbox)
         LogMessage { msgNodeId = nid
                    , msgTerm   = currTerm st
                    , msgRole   = currRole st
-                   , msgString = str
+                   , msgString = show (commitIdx, weightedSum commitLog)
                    }
+        where weightedSum = U.sum . U.map weight
+              weight :: LogEntry -> Double
+              weight LogEntry { logIndex = i, logSeed = x } =
+                let n = ((/) `on` fromIntegral) (word32 x) (maxBound :: Word32)
+                in fromIntegral i * n
 
 putMessages :: Mailbox -> IO ()
 putMessages mailbox = atomically $ putTMVar (putMsg mailbox) ()
@@ -184,10 +191,11 @@ saveSession :: MVar ServerState -> Process ()
 saveSession mx = do
   st <- readMVar mx
   liftIO . BC.writeFile (sessionFile st)
-    $ encode PersistentState { sessTerm     = currTerm st
-                             , sessVotedFor = endPointAddressToByteString
-                                              . nodeAddress <$> votedFor st
-                             , sessVec      = currVec st
+    $ encode PersistentState { sessTerm      = currTerm st
+                             , sessVotedFor  = endPointAddressToByteString
+                                               . nodeAddress <$> votedFor st
+                             , sessVec       = currVec st
+                             , sessCommitIdx = commitIndex st
                              }
 
 restoreSession :: FilePath -> Process PersistentState
@@ -197,7 +205,8 @@ restoreSession file =
           | isDoesNotExistError e = return emptySession
           | otherwise             = throwIO e
 
-        emptySession = PersistentState { sessTerm     = 0
-                                       , sessVotedFor = Nothing
-                                       , sessVec      = LogVector U.empty
+        emptySession = PersistentState { sessTerm      = 0
+                                       , sessVotedFor  = Nothing
+                                       , sessVec       = LogVector U.empty
+                                       , sessCommitIdx = 0
                                        }
