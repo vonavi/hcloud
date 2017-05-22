@@ -6,9 +6,11 @@ module Raft
   ) where
 
 import           Control.Concurrent.MVar.Lifted (newMVar, readMVar)
-import           Control.Distributed.Process    (Process, getSelfPid, register)
+import           Control.Distributed.Process    (NodeId (..), Process,
+                                                 getSelfPid, register)
 import           Control.Monad                  (forever)
 import qualified Data.Map.Strict                as M
+import           Network.Transport              (EndPointAddress (..))
 
 import           Raft.Candidate                 (candidate)
 import           Raft.Follower                  (follower)
@@ -19,13 +21,14 @@ import           Raft.Utils                     (registerMailbox,
 
 initRaft :: RaftParams -> Process ()
 initRaft params = do
-  (term, voted, logs, cIdx) <- restoreSession $ raftFile params
+  session <- restoreSession $ raftFile params
   let peers = raftPeers params
-  mx <- newMVar ServerState { currTerm    = term
-                            , votedFor    = voted
+  mx <- newMVar ServerState { currTerm    = sessTerm session
+                            , votedFor    = NodeId . EndPointAddress
+                                            <$> sessVotedFor session
                             , currRole    = Follower
-                            , currVec     = logs
-                            , commitIndex = cIdx
+                            , currVec     = sessVec session
+                            , commitIndex = 0
                             , lastApplied = 0
                             , nextIndex   = M.empty
                             , matchIndex  = M.fromList $ zip peers (repeat 0)

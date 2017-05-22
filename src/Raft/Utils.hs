@@ -183,20 +183,21 @@ putMessages mailbox = atomically $ putTMVar (putMsg mailbox) ()
 saveSession :: MVar ServerState -> Process ()
 saveSession mx = do
   st <- readMVar mx
-  let term = currTerm st
-      bs   = endPointAddressToByteString . nodeAddress <$> votedFor st
-      logs = currVec st
-      cIdx = commitIndex st
-  liftIO . BC.writeFile (sessionFile st) $ encode (term, bs, logs, cIdx)
+  liftIO . BC.writeFile (sessionFile st)
+    $ encode PersistentState { sessTerm     = currTerm st
+                             , sessVotedFor = endPointAddressToByteString
+                                              . nodeAddress <$> votedFor st
+                             , sessVec      = currVec st
+                             }
 
-restoreSession :: FilePath -> Process (Term, Maybe LeaderId, LogVector, Int)
-restoreSession file = do
-  (term, bs, logs, cIdx) <- liftIO . handle fileHandler
-                            $ either error id . decode <$> BC.readFile file
-  return (term, toVoted bs, logs, cIdx)
-    where fileHandler e
-            | isDoesNotExistError e = return (0, Nothing, LogVector U.empty, 0)
-            | otherwise             = throwIO e
+restoreSession :: FilePath -> Process PersistentState
+restoreSession file =
+  liftIO . handle fileHandler $ either error id . decode <$> BC.readFile file
+  where fileHandler e
+          | isDoesNotExistError e = return emptySession
+          | otherwise             = throwIO e
 
-          toVoted :: Maybe BC.ByteString -> Maybe LeaderId
-          toVoted = fmap (NodeId . EndPointAddress)
+        emptySession = PersistentState { sessTerm     = 0
+                                       , sessVotedFor = Nothing
+                                       , sessVec      = LogVector U.empty
+                                       }

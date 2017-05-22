@@ -21,6 +21,7 @@ module Raft.Types
   , AppendEntriesReq(..)
   , AppendEntriesRes(..)
   , RemindTimeout(..)
+  , PersistentState(..)
   , raftServerName
   , electionTimeoutMs
   , heartbeatTimeoutMs
@@ -31,6 +32,7 @@ import           Control.Concurrent.Chan      (Chan)
 import           Control.Concurrent.STM.TMVar (TMVar)
 import           Control.Distributed.Process  (NodeId)
 import           Data.Binary                  (Binary)
+import           Data.ByteString.Char8        as BC
 import qualified Data.Map.Strict              as M
 import           Data.Serialize               (Serialize)
 import           Data.Typeable                (Typeable)
@@ -212,6 +214,18 @@ data RemindTimeout = HeartbeatTimeout
                    | ElectionTimeout
                    deriving (Typeable, Generic)
 instance Binary RemindTimeout
+
+-- | Server's persistent state
+data PersistentState = PersistentState
+                       { sessTerm     :: {-# UNPACK #-} !Term
+                         -- ^ Latest term server has seen
+                       , sessVotedFor :: Maybe BC.ByteString
+                         -- ^ CandidateId that received vote in
+                         --   current term
+                       , sessVec      :: LogVector
+                         -- ^ Log entries
+                       }
+                     deriving (Generic, Serialize)
 
 -- | Server's name in registry
 raftServerName :: String
