@@ -40,8 +40,7 @@ respondToServers mx =
       void $ syncWithTerm mx term
       unlessStaleTerm term $ do
         success <- appendEntries mx req
-        when (success && (not . U.null . getLog $ areqEntries req))
-          $ saveSession mx
+        when success $ saveSession mx
 
         st   <- readMVar mx
         node <- getSelfNode
@@ -120,7 +119,9 @@ appendEntries mx req = do
   where
     setLog entries st = st { currVec = LogVector entries }
 
-    updCommits st = st { commitIndex = n }
+    updCommits st = st { commitIndex = n
+                       , lastApplied = n
+                       }
       where es = getLog $ currVec st
             n  = if U.null es
                  then 0

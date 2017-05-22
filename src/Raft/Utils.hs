@@ -162,14 +162,14 @@ registerMailbox mx mailbox = do
     liftIO $ do
       atomically $ isEmptyTMVar (putMsg mailbox) >>= check . not
       st <- readMVar mx
-      let commitIdx = commitIndex st
-          commitLog = U.dropWhile ((> commitIdx) . logIndex)
-                      . getLog $ currVec st
+      let applied    = lastApplied st
+          logApplied = U.dropWhile ((> applied) . logIndex)
+                       . getLog $ currVec st
       writeChan (msgBox mailbox)
         LogMessage { msgNodeId = nid
                    , msgTerm   = currTerm st
                    , msgRole   = currRole st
-                   , msgString = show (commitIdx, weightedSum commitLog)
+                   , msgString = show (applied, weightedSum logApplied)
                    }
         where weightedSum = U.sum . U.map weight
               weight :: LogEntry -> Double
@@ -184,11 +184,12 @@ saveSession :: MVar ServerState -> Process ()
 saveSession mx = do
   st <- readMVar mx
   liftIO . BC.writeFile (sessionFile st)
-    $ encode PersistentState { sessTerm      = currTerm st
-                             , sessVotedFor  = endPointAddressToByteString
-                                               . nodeAddress <$> votedFor st
-                             , sessVec       = currVec st
-                             , sessCommitIdx = commitIndex st
+    $ encode PersistentState { sessTerm        = currTerm st
+                             , sessVotedFor    = endPointAddressToByteString
+                                                 . nodeAddress <$> votedFor st
+                             , sessVec         = currVec st
+                             , sessCommitIdx   = commitIndex st
+                             , sessLastApplied = lastApplied st
                              }
 
 restoreSession :: FilePath -> Process PersistentState
@@ -198,8 +199,9 @@ restoreSession file =
           | isDoesNotExistError e = return emptySession
           | otherwise             = throwIO e
 
-        emptySession = PersistentState { sessTerm      = 0
-                                       , sessVotedFor  = Nothing
-                                       , sessVec       = LogVector U.empty
-                                       , sessCommitIdx = 0
+        emptySession = PersistentState { sessTerm        = 0
+                                       , sessVotedFor    = Nothing
+                                       , sessVec         = LogVector U.empty
+                                       , sessCommitIdx   = 0
+                                       , sessLastApplied = 0
                                        }

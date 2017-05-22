@@ -119,32 +119,32 @@ type LeaderId = NodeId
 -- | State on all servers
 data ServerState = ServerState
                    { currTerm    :: {-# UNPACK #-} !Term
-                     -- ^ Latest term server has seen
+                     -- ^ latest term server has seen
                    , votedFor    :: Maybe LeaderId
-                     -- ^ CandidateId that received vote in current
+                     -- ^ candidateId that received vote in current
                      --   term
                    , currRole    :: Role
-                     -- ^ Server state
+                     -- ^ server state
                    , currVec     :: LogVector
-                     -- ^ Log entries
+                     -- ^ log entries
                    , commitIndex :: {-# UNPACK #-} !Int
-                     -- ^ Index of highest log entry known to be
+                     -- ^ index of highest log entry known to be
                      --   committed
                    , lastApplied :: {-# UNPACK #-} !Int
-                     -- ^ Index of highest log entry applied to state
+                     -- ^ index of highest log entry applied to state
                      --   machine
                    , nextIndex   :: M.Map NodeId Int
-                     -- ^ For each server, index of the next log entry
+                     -- ^ for each server, index of the next log entry
                      --   to send to that server
                    , matchIndex  :: M.Map NodeId Int
-                     -- ^ For each server, index of highest log entry
+                     -- ^ for each server, index of highest log entry
                      --   known to be replicated on server
                    , initSeed    :: {-# UNPACK #-} !Xorshift32
-                     -- ^ Initial seed of randomly generated messages
+                     -- ^ initial seed of randomly generated messages
                    , sessionFile :: FilePath
-                     -- ^ File storing the persistent state of server
+                     -- ^ file storing the persistent state of server
                    , selfLogger  :: {-# UNPACK #-} !(Chan LogMessage)
-                     -- ^ Channel for debug information
+                     -- ^ channel for debug information
                    }
 
 -- | RequestVote RPC request
@@ -217,14 +217,19 @@ instance Binary RemindTimeout
 
 -- | Server's persistent state
 data PersistentState = PersistentState
-                       { sessTerm      :: {-# UNPACK #-} !Term
-                         -- ^ Latest term server has seen
-                       , sessVotedFor  :: Maybe BC.ByteString
-                         -- ^ CandidateId that received vote in
+                       { sessTerm        :: {-# UNPACK #-} !Term
+                         -- ^ latest term server has seen
+                       , sessVotedFor    :: Maybe BC.ByteString
+                         -- ^ candidateId that received vote in
                          --   current term
-                       , sessVec       :: LogVector
-                         -- ^ Log entries
-                       , sessCommitIdx :: {-# UNPACK #-} !Int
+                       , sessVec         :: LogVector
+                         -- ^ log entries
+                       , sessCommitIdx   :: {-# UNPACK #-} !Int
+                         -- ^ index of highest log entry known to be
+                         --   committed
+                       , sessLastApplied :: {-# UNPACK #-} !Int
+                         -- ^ index of highest log entry applied to
+                         --   state machine
                        }
                      deriving (Generic, Serialize)
 
@@ -234,7 +239,7 @@ raftServerName = "raft"
 
 -- | Election timeout in milliseconds
 electionTimeoutMs :: Int
-electionTimeoutMs = 150
+electionTimeoutMs = 30
 
 -- | Heartbeat timeout in milliseconds
 heartbeatTimeoutMs :: Int

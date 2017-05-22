@@ -167,7 +167,9 @@ updateCommitIndex mx = do
       term         = logTerm . fromJust
                      . U.find ((== n) . logIndex) .  getLog $ logs
   when ((n > commitIndex st) && (term == currTerm st))
-    $ modifyMVar_ mx $ \s -> return s { commitIndex = n }
+    . modifyMVar_ mx $ \s -> return s { commitIndex = n
+                                      , lastApplied = n
+                                      }
 
 decrementNextIndex :: MVar ServerState -> NodeId -> Process ()
 decrementNextIndex mx peer =
