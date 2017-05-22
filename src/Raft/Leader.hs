@@ -31,6 +31,7 @@ import           Raft.Utils                               (getLastIndex,
                                                            isTermStale,
                                                            nextRandomNum,
                                                            remindTimeout,
+                                                           saveSession,
                                                            syncWithTerm,
                                                            writeLogger)
 
@@ -113,6 +114,7 @@ startCommunications mx peers heartbeat =
         SendIntervalTimeout -> do
           exit heartbeat ()
           modifyMVar_ mx $ return . newClientEntry
+          saveSession mx
           forM_ peers $ sendAppendEntries mx
           remindHeartbeat >>= startCommunications mx peers
 

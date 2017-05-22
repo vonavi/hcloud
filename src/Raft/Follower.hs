@@ -9,7 +9,7 @@ import           Control.Concurrent.MVar.Lifted (MVar, modifyMVar_, readMVar)
 import           Control.Distributed.Process    (Process, exit, getSelfNode,
                                                  match, nsendRemote,
                                                  receiveWait)
-import           Control.Monad                  (unless, void)
+import           Control.Monad                  (unless, void, when)
 import           Data.Monoid                    ((<>))
 import qualified Data.Vector.Unboxed            as U
 
@@ -40,7 +40,9 @@ respondToServers mx =
       void $ syncWithTerm mx term
       unlessStaleTerm term $ do
         success <- appendEntries mx req
-        saveSession mx
+        when (success && (not . U.null . getLog $ areqEntries req))
+          $ saveSession mx
+
         st   <- readMVar mx
         node <- getSelfNode
         nsendRemote (leaderId req) raftServerName
@@ -57,13 +59,12 @@ respondToServers mx =
       void $ syncWithTerm mx term
       unlessStaleTerm term $ do
         success <- voteForCandidate mx req
-        saveSession mx
-        stTerm <- currTerm <$> readMVar mx
-
         writeLogger mx
           $ if success
             then "giving a vote for " ++ show (vreqCandidateId req)
             else "giving no vote for " ++ show (vreqCandidateId req)
+
+        stTerm <- currTerm <$> readMVar mx
         nsendRemote (vreqCandidateId req) raftServerName
           RequestVoteRes { vresTerm    = stTerm
                          , voteGranted = success
