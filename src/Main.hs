@@ -14,7 +14,7 @@ import           Control.Distributed.Process.Node (closeLocalNode, forkProcess,
                                                    initRemoteTable,
                                                    newLocalNode, runProcess)
 import           Control.Exception                (catch, throwIO)
-import           Control.Monad                    (forM_, forever)
+import           Control.Monad                    (forM_, forever, when)
 import           Control.Monad.Trans.State        (StateT, evalStateT, get, put)
 import qualified Data.ByteString.Char8            as BC
 import           Data.List                        (delete)
@@ -27,6 +27,7 @@ import           Network.Transport.TCP            (createTransport,
 import           Options.Applicative              (execParser)
 import           System.Directory                 (getTemporaryDirectory,
                                                    removeFile)
+import           System.Exit                      (die)
 import           System.FilePath.Posix            ((</>))
 import           System.IO.Error                  (isDoesNotExistError)
 import           System.Random                    (randomRIO)
@@ -46,8 +47,12 @@ main = do
   execParser getParameters >>= \case
     RunParams cfg -> do
       nodeEndPoints <- map read . lines <$> readFile (nodeConf cfg)
-      files         <- mapM tempSessionFile nodeEndPoints
+      checkParameters cfg nodeEndPoints
+
+      -- Remove session files from previous runs
+      files <- mapM tempSessionFile nodeEndPoints
       mapM_ rmSessionFile files
+
       let nidList = map mkNodeId nodeEndPoints
           storage = M.fromList $ zip nidList files
       connections <- forConcurrently nodeEndPoints $ \ept -> do
@@ -66,8 +71,12 @@ main = do
 
     TestParams cfg -> do
       nodeEndPoints <- map read . lines <$> readFile (nodeConf cfg)
-      files         <- mapM tempSessionFile nodeEndPoints
+      checkParameters cfg nodeEndPoints
+
+      -- Remove session files from previous runs
+      files <- mapM tempSessionFile nodeEndPoints
       mapM_ rmSessionFile files
+
       let nidList = map mkNodeId nodeEndPoints
           nodeCfg = NodeConfig
                     { stopEpts  = nodeEndPoints
@@ -82,12 +91,19 @@ main = do
       killThread tid
       mapM_ rmSessionFile files
 
+checkParameters :: Config -> [NodeEndPoint] -> IO ()
+checkParameters cfg nodeEndPoints = do
+  when (sendPeriod cfg <= 0) $ die "Sending period should be positive."
+  when (gracePeriod cfg <= 0) $ die "Grace period should be positive."
+  when (msgSeed cfg == 0) $ die "Seed value should be non-zero."
+  when (length nodeEndPoints < 2) $ die "At least two nodes required."
+
 startServer :: RaftParams -> NodeEndPoint -> IO Connection
 startServer params ept = do
   tr   <- either (error . show) id
           <$> createTransport (getHost ept) (getPort ept) defaultTCPParameters
   node <- newLocalNode tr initRemoteTable
-  pid <- forkProcess node $ initRaft params
+  pid  <- forkProcess node $ initRaft params
   return (pid, node, tr)
 
 stopServer :: Connection -> IO ()
