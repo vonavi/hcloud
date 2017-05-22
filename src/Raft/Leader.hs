@@ -26,7 +26,8 @@ import           Data.Ord                                 (Down (..), comparing)
 import qualified Data.Vector.Unboxed                      as U
 
 import           Raft.Types
-import           Raft.Utils                               (getNextIndex,
+import           Raft.Utils                               (getLastIndex,
+                                                           getNextIndex,
                                                            isTermStale,
                                                            nextRandomNum,
                                                            remindTimeout,
@@ -157,10 +158,12 @@ updateCommitIndex :: MVar ServerState -> Process ()
 updateCommitIndex mx = do
   st <- readMVar mx
   -- Find the index 'n' of log entry replicated on a majority of the servers
-  let idxList = sortBy (comparing Down) . map snd . M.toList $ matchIndex st
-      n       = idxList !! ((length idxList - 1) `div` 2)
-      term    = logTerm . fromJust . U.find ((== n) . logIndex)
-                . getLog $ currVec st
+  let logs         = currVec st
+      matchIdxList = sortBy (comparing Down) . (getLastIndex logs :)
+                     . map snd . M.toList $ matchIndex st
+      n            = matchIdxList !! (length matchIdxList `div` 2)
+      term         = logTerm . fromJust
+                     . U.find ((== n) . logIndex) .  getLog $ logs
   when ((n > commitIndex st) && (term == currTerm st))
     $ modifyMVar_ mx $ \s -> return s { commitIndex = n }
 

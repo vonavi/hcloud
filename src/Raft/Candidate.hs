@@ -20,7 +20,6 @@ import           Control.Monad                            (forM_)
 import           Raft.Types
 import           Raft.Utils                               (getLastIndex,
                                                            getLastTerm,
-                                                           incCurrentTerm,
                                                            isTermStale,
                                                            randomElectionTimeout,
                                                            remindTimeout,
@@ -29,7 +28,7 @@ import           Raft.Utils                               (getLastIndex,
 
 candidate :: MVar ServerState -> [NodeId] -> Process ()
 candidate mx peers = do
-  incCurrentTerm mx
+  initCandidate mx
   writeLogger mx "Hi!"
   eTime    <- randomElectionTimeout $ electionTimeoutMs * 1000
   reminder <- remindTimeout eTime ElectionTimeout
@@ -39,6 +38,16 @@ candidate mx peers = do
 
   collectVotes mx $ (length peers + 1) `div` 2
   exit reminder ()
+
+initCandidate :: MVar ServerState -> Process ()
+initCandidate mx = do
+  nid <- getSelfNode
+  -- On conversion to candidate:
+  -- - Increment currentTerm
+  -- - Vote for self
+  modifyMVar_ mx $ \st -> return st { currTerm = succ $ currTerm st
+                                    , votedFor = Just nid
+                                    }
 
 sendRequestVote :: MVar ServerState -> NodeId -> Process ()
 sendRequestVote mx peer = do

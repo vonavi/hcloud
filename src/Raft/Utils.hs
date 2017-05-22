@@ -4,7 +4,6 @@ module Raft.Utils
   (
     isTermStale
   , syncWithTerm
-  , incCurrentTerm
   , remindTimeout
   , randomElectionTimeout
   , getMatchIndex
@@ -78,12 +77,6 @@ syncWithTerm mx term = do
                                               }
             return True
     else return False
-
-incCurrentTerm :: MonadBaseControl IO m => MVar ServerState -> m ()
-incCurrentTerm mx = modifyMVar_ mx
-                    $ \st -> return st { currTerm = succ $ currTerm st
-                                       , votedFor = Nothing
-                                       }
 
 remindTimeout :: Int -> RemindTimeout -> Process ProcessId
 remindTimeout micros timeout = do
